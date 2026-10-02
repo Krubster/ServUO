@@ -141,6 +141,14 @@ namespace Server.Services.BotWatch
                     Score(p.Watch), p.CoreActivity), "#FF5050")
                 : Text("No scout pattern", "#70E070");
 
+            FlagRecord flag = Flags.LatestFor(rec.Serial);
+
+            if (flag != null)
+                banner += Text(String.Format("   Flag #{0}: {1}", flag.Id, flag.Status), FlagGump.StatusColor(flag.Status));
+
+            if (p.Reporters > 0)
+                banner += Text(String.Format("   Reported by {0} player{1}", p.Reporters, p.Reporters == 1 ? "" : "s"), "#FFB040");
+
             AddHtml(20, 64, Width - 40, 20, banner, false, false);
         }
 

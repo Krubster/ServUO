@@ -14,6 +14,7 @@ namespace Server.Services.BotWatch
             CommandSystem.Register("Network", AccessLevel.Counselor, Network_OnCommand);
             CommandSystem.Register("Networks", AccessLevel.Counselor, Networks_OnCommand);
             CommandSystem.Register("BWAlerts", AccessLevel.Counselor, Alerts_OnCommand);
+            CommandSystem.Register("Flags", AccessLevel.Counselor, Flags_OnCommand);
             CommandSystem.Register("BWStatus", AccessLevel.GameMaster, Status_OnCommand);
             CommandSystem.Register("BWActivity", AccessLevel.Counselor, Activity_OnCommand);
         }
@@ -81,6 +82,13 @@ namespace Server.Services.BotWatch
 
             foreach (AlertRecord a in alerts.AsEnumerable().Reverse())
                 e.Mobile.SendMessage(0x35, "{0:MM-dd HH:mm} UTC: {1}", a.Time, a.Text);
+        }
+
+        [Usage("Flags")]
+        [Description("Opens the BotWatch flags waiting for review.")]
+        private static void Flags_OnCommand(CommandEventArgs e)
+        {
+            e.Mobile.SendGump(new FlagsGump(e.Mobile, FlagStatus.Open, 0));
         }
 
         [Usage("BWStatus")]

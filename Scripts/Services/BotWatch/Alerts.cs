@@ -10,7 +10,9 @@ namespace Server.Services.BotWatch
     {
         NewAccountInNetwork,
         FreshCharacterIdle,
-        FreshWatchPattern
+        FreshWatchPattern,
+        Report,
+        Flagged
     }
 
     public class AlertRecord
@@ -80,9 +82,14 @@ namespace Server.Services.BotWatch
         /// </summary>
         public static void Raise(AlertKind kind, string account, Serial character, string name, string text)
         {
+            Raise(kind, account, character, name, text, false);
+        }
+
+        public static void Raise(AlertKind kind, string account, Serial character, string name, string text, bool always)
+        {
             DateTime now = DateTime.UtcNow;
 
-            bool repeated = Recent.Any(a => a.Kind == kind && now - a.Time < Repeat &&
+            bool repeated = !always && Recent.Any(a => a.Kind == kind && now - a.Time < Repeat &&
                 (character != Serial.MinusOne ? a.Character == character : a.Account == account));
 
             if (repeated)
@@ -220,6 +227,8 @@ namespace Server.Services.BotWatch
                     rec.Name, rec.Account, p.ScoutPattern ? "scout pattern" : "Watch pattern",
                     ProfileGump.Score(p.Watch), ProfileGump.Score(p.Session), linked));
             }
+
+            Flags.Check(profiles, null);
         }
     }
 }

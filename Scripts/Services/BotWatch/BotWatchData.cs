@@ -191,6 +191,47 @@ namespace Server.Services.BotWatch
         }
     }
 
+    /// <summary>One resolved encounter, kept for evidence.</summary>
+    public class EncounterNote
+    {
+        public DateTime Time;
+        public Map Map;
+        public Point3D Location;
+        public Serial Other;
+        public string OtherName;
+        public bool Idle;
+        public bool Reacted;
+        public bool NearTeleporter;
+
+        public void Serialize(GenericWriter writer)
+        {
+            writer.Write(0); // version
+
+            writer.Write(Time);
+            writer.Write(Map);
+            writer.Write(Location);
+            writer.Write(Other.Value);
+            writer.Write(OtherName);
+            writer.Write(Idle);
+            writer.Write(Reacted);
+            writer.Write(NearTeleporter);
+        }
+
+        public void Deserialize(GenericReader reader)
+        {
+            reader.ReadInt(); // version
+
+            Time = reader.ReadDateTime();
+            Map = reader.ReadMap();
+            Location = reader.ReadPoint3D();
+            Other = (Serial)reader.ReadInt();
+            OtherName = reader.ReadString();
+            Idle = reader.ReadBool();
+            Reacted = reader.ReadBool();
+            NearTeleporter = reader.ReadBool();
+        }
+    }
+
     /// <summary>
     /// Everything BotWatch keeps about one character. Survives the character's deletion so
     /// throwaway scouts stay on record.
@@ -210,6 +251,19 @@ namespace Server.Services.BotWatch
         public int BankItems;
 
         public readonly SortedDictionary<long, HourBucket> Hours = new SortedDictionary<long, HourBucket>();
+
+        public const int MaxEncounterNotes = 50;
+
+        /// <summary>The most recent resolved encounters, oldest first.</summary>
+        public readonly List<EncounterNote> RecentEncounters = new List<EncounterNote>();
+
+        public void AddEncounter(EncounterNote note)
+        {
+            RecentEncounters.Add(note);
+
+            if (RecentEncounters.Count > MaxEncounterNotes)
+                RecentEncounters.RemoveRange(0, RecentEncounters.Count - MaxEncounterNotes);
+        }
 
         public bool IsDeleted => Deleted != DateTime.MinValue;
 
@@ -257,7 +311,7 @@ namespace Server.Services.BotWatch
 
         public void Serialize(GenericWriter writer)
         {
-            writer.Write(1); // version
+            writer.Write(2); // version
 
             writer.Write(Serial.Value);
             writer.Write(Name);
@@ -278,6 +332,12 @@ namespace Server.Services.BotWatch
 
             // version 1
             writer.Write(Deleted);
+
+            // version 2
+            writer.Write(RecentEncounters.Count);
+
+            foreach (EncounterNote note in RecentEncounters)
+                note.Serialize(writer);
         }
 
         public void Deserialize(GenericReader reader)
@@ -305,6 +365,18 @@ namespace Server.Services.BotWatch
 
             if (version >= 1)
                 Deleted = reader.ReadDateTime();
+
+            if (version >= 2)
+            {
+                count = reader.ReadInt();
+
+                for (int i = 0; i < count; i++)
+                {
+                    EncounterNote note = new EncounterNote();
+                    note.Deserialize(reader);
+                    RecentEncounters.Add(note);
+                }
+            }
         }
     }
 

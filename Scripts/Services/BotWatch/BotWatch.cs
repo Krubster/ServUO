@@ -118,6 +118,8 @@ namespace Server.Services.BotWatch
             Ratings.Configure();
             Networks.Configure();
             Alerts.Configure();
+            Reports.Configure();
+            Flags.Configure();
 
             EventSink.WorldSave += e => Save();
             EventSink.WorldLoad += Load;
@@ -132,6 +134,7 @@ namespace Server.Services.BotWatch
 
             TeleporterIndex.Initialize();
             Alerts.Initialize();
+            Reports.Initialize();
 
             Timer.DelayCall(ScanInterval, ScanInterval, Scan);
 
@@ -625,6 +628,20 @@ namespace Server.Services.BotWatch
                         bucket.TeleporterIdleEncounters++;
                 }
 
+                Mobile other = World.FindMobile(p.Other);
+
+                live.Record.AddEncounter(new EncounterNote
+                {
+                    Time = p.Time,
+                    Map = p.Map,
+                    Location = p.Location,
+                    Other = p.Other,
+                    OtherName = other != null ? other.RawName : "?",
+                    Idle = idle,
+                    Reacted = p.Reacted,
+                    NearTeleporter = p.NearTeleporter
+                });
+
                 live.Pending.RemoveAt(i);
             }
         }
@@ -666,10 +683,12 @@ namespace Server.Services.BotWatch
                 Addresses.Remove(key);
 
             Alerts.Prune(now - SessionRetention);
+            Reports.Prune(now - SessionRetention);
+            Flags.Prune(now - SessionRetention);
 
             Persistence.Serialize(SavePath, writer =>
             {
-                writer.Write(1); // version
+                writer.Write(2); // version
 
                 writer.Write(Characters.Count);
 
@@ -692,6 +711,23 @@ namespace Server.Services.BotWatch
 
                 foreach (AlertRecord a in Alerts.Recent)
                     a.Serialize(writer);
+
+                // version 2
+                writer.Write(Reports.All.Count);
+
+                foreach (ReportRecord r in Reports.All)
+                    r.Serialize(writer);
+
+                writer.Write(Reports.Blocked.Count);
+
+                foreach (string account in Reports.Blocked)
+                    writer.Write(account);
+
+                writer.Write(Flags.NextId);
+                writer.Write(Flags.All.Count);
+
+                foreach (FlagRecord f in Flags.All)
+                    f.Serialize(writer);
             });
         }
 
@@ -753,6 +789,33 @@ namespace Server.Services.BotWatch
 
                     if (earliest < DataSince)
                         DataSince = earliest;
+                }
+
+                if (version >= 2)
+                {
+                    count = reader.ReadInt();
+
+                    for (int i = 0; i < count; i++)
+                    {
+                        ReportRecord r = new ReportRecord();
+                        r.Deserialize(reader);
+                        Reports.All.Add(r);
+                    }
+
+                    count = reader.ReadInt();
+
+                    for (int i = 0; i < count; i++)
+                        Reports.Blocked.Add(reader.ReadString());
+
+                    Flags.NextId = reader.ReadInt();
+                    count = reader.ReadInt();
+
+                    for (int i = 0; i < count; i++)
+                    {
+                        FlagRecord f = new FlagRecord();
+                        f.Deserialize(reader);
+                        Flags.All.Add(f);
+                    }
                 }
             });
         }

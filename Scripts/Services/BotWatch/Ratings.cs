@@ -55,6 +55,8 @@ namespace Server.Services.BotWatch
         public readonly List<ScoreComponent> SessionParts = new List<ScoreComponent>();
 
         public int SessionCount;
+        public int Reports;
+        public int Reporters;
         public readonly List<DayStats> Days = new List<DayStats>();
         public readonly List<string> Notes = new List<string>();
 
@@ -91,6 +93,7 @@ namespace Server.Services.BotWatch
         public static TimeSpan ShortSession { get; private set; }
         public static int FreshDays { get; private set; }
         public static int LowSkills { get; private set; }
+        public static double MinScoreWeight { get; private set; }
 
         public static void Configure()
         {
@@ -105,6 +108,7 @@ namespace Server.Services.BotWatch
             ShortSession = Config.Get("BotWatch.ShortSession", TimeSpan.FromMinutes(15));
             FreshDays = Config.Get("BotWatch.FreshDays", 7);
             LowSkills = Config.Get("BotWatch.LowSkills", 200);
+            MinScoreWeight = Config.Get("BotWatch.MinScoreWeight", 0.5);
         }
 
         /// <summary>Computes profiles for every character with activity in the window.</summary>
@@ -157,6 +161,8 @@ namespace Server.Services.BotWatch
             };
 
             p.InPopulation = p.OnlineHours >= MinOnlineHours;
+            p.Reports = Reports.For(rec.Serial, from).Count();
+            p.Reporters = Reports.DistinctReporters(rec.Serial, from);
 
             ComputeRaw(p, b);
             ComputeWatch(p, b);
@@ -167,10 +173,17 @@ namespace Server.Services.BotWatch
                 p.Notes.Add(String.Format("Less than {0:F1}h online in the window: ratings are unreliable.", MinOnlineHours));
 
             if (b.Encounters < MinEncounters)
-                p.Notes.Add(String.Format("Only {0} encounters (need {1}): Watch is based on presence only.", b.Encounters, MinEncounters));
+                p.Notes.Add(String.Format("Only {0} encounters (need {1}): {2}", b.Encounters, MinEncounters,
+                    p.Watch.HasValue ? "Watch is based on presence only." : "not enough data for a Watch score."));
+
+            if (!p.Session.HasValue)
+                p.Notes.Add(String.Format("Fewer than {0} finished sessions: not enough data for a Session score.", MinSessions));
 
             if (rec.IsDeleted)
                 p.Notes.Add(String.Format("Character deleted on {0:yyyy-MM-dd}.", rec.Deleted));
+
+            if (p.Reports > 0)
+                p.Notes.Add(String.Format("Reported {0} times by {1} players.", p.Reports, p.Reporters));
 
             if (b[Activity.FastWalk] > 0)
                 p.Notes.Add(String.Format("{0} speed-hack attempts.", b[Activity.FastWalk]));
@@ -259,11 +272,17 @@ namespace Server.Services.BotWatch
             return whole >= minWhole && whole > 0 ? part / whole : (double?)null;
         }
 
+        /// <summary>
+        /// Weighted average of the parts that have data. A score built from too few parts
+        /// would let a single signal decide, so it needs parts carrying at least
+        /// MinScoreWeight of the total weight.
+        /// </summary>
         private static double? Combine(List<ScoreComponent> parts)
         {
             double weight = parts.Where(c => c.Value.HasValue).Sum(c => c.Weight);
+            double total = parts.Sum(c => c.Weight);
 
-            if (weight <= 0)
+            if (weight <= 0 || weight < total * MinScoreWeight)
                 return null;
 
             return 100.0 * parts.Where(c => c.Value.HasValue).Sum(c => c.Weight * c.Value.Value) / weight;

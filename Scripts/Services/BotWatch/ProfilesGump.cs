@@ -54,15 +54,16 @@ namespace Server.Services.BotWatch
                 "<BIG>BotWatch profiles</BIG>   {0} characters active in the last {1:F0} days, {2} with the scout pattern",
                 profiles.Count, Ratings.Window.TotalDays, profiles.Count(p => p.ScoutPattern)), "#FFD080"), false, false);
 
-            int[] cols = { 50, 200, 320, 390, 450, 520, 660 };
+            int[] cols = { 50, 190, 300, 365, 425, 490, 570, 675 };
 
             AddSortHeader(cols[0], "Name", SortBy.Name);
             AddHtml(cols[1], 48, 110, 20, ProfileGump.Text("Account", "#FFD080"), false, false);
             AddSortHeader(cols[2], "Online", SortBy.Online);
             AddSortHeader(cols[3], "Watch", SortBy.Watch);
             AddSortHeader(cols[4], "Session", SortBy.Session);
-            AddHtml(cols[5], 48, 140, 20, ProfileGump.Text("Top activity", "#FFD080"), false, false);
-            AddHtml(cols[6], 48, 90, 20, ProfileGump.Text("Pattern", "#FFD080"), false, false);
+            AddHtml(cols[5], 48, 80, 20, ProfileGump.Text("Reports", "#FFD080"), false, false);
+            AddHtml(cols[6], 48, 110, 20, ProfileGump.Text("Top activity", "#FFD080"), false, false);
+            AddHtml(cols[7], 48, 70, 20, ProfileGump.Text("Pattern", "#FFD080"), false, false);
 
             int y = 74;
 
@@ -77,15 +78,16 @@ namespace Server.Services.BotWatch
                 string name = rec.Name + (rec.IsDeleted ? " (deleted)" : BotWatch.IsOnline(rec.Serial) ? " *" : String.Empty);
 
                 AddButton(20, y, 4011, 4012, ButtonProfileBase + i, GumpButtonType.Reply, 0);
-                AddHtml(cols[0], y + 2, 145, 20, ProfileGump.Text(name), false, false);
-                AddHtml(cols[1], y + 2, 115, 20, ProfileGump.Text(rec.Account ?? "?", "#C0C0C0"), false, false);
-                AddHtml(cols[2], y + 2, 65, 20, ProfileGump.Text(String.Format("{0:F1}h", p.OnlineHours) + (p.InPopulation ? String.Empty : "!"), "#C0C0C0"), false, false);
+                AddHtml(cols[0], y + 2, 135, 20, ProfileGump.Text(name), false, false);
+                AddHtml(cols[1], y + 2, 105, 20, ProfileGump.Text(rec.Account ?? "?", "#C0C0C0"), false, false);
+                AddHtml(cols[2], y + 2, 60, 20, ProfileGump.Text(String.Format("{0:F1}h", p.OnlineHours) + (p.InPopulation ? String.Empty : "!"), "#C0C0C0"), false, false);
                 AddHtml(cols[3], y + 2, 55, 20, ProfileGump.Text(ProfileGump.Score(p.Watch), ProfileGump.ScoreColor(p.Watch, Ratings.ScoutWatchThreshold)), false, false);
                 AddHtml(cols[4], y + 2, 60, 20, ProfileGump.Text(ProfileGump.Score(p.Session), ProfileGump.ScoreColor(p.Session, Ratings.SessionThreshold)), false, false);
-                AddHtml(cols[5], y + 2, 135, 20, ProfileGump.Text(topText, "#C0C0C0"), false, false);
+                AddHtml(cols[5], y + 2, 75, 20, ProfileGump.Text(p.Reporters > 0 ? String.Format("{0} ({1})", p.Reports, p.Reporters) : "-", p.Reporters > 0 ? "#FFB040" : "#C0C0C0"), false, false);
+                AddHtml(cols[6], y + 2, 105, 20, ProfileGump.Text(topText, "#C0C0C0"), false, false);
 
                 if (p.ScoutPattern)
-                    AddHtml(cols[6], y + 2, 90, 20, ProfileGump.Text("SCOUT", "#FF5050"), false, false);
+                    AddHtml(cols[7], y + 2, 70, 20, ProfileGump.Text("SCOUT", "#FF5050"), false, false);
 
                 y += 24;
             }
@@ -109,7 +111,7 @@ namespace Server.Services.BotWatch
                 case SortBy.Session: return profiles.OrderByDescending(p => p.Session ?? -1);
                 case SortBy.Online: return profiles.OrderByDescending(p => p.OnlineHours);
                 case SortBy.Name: return profiles.OrderBy(p => p.Record.Name);
-                default: return profiles.OrderByDescending(p => p.ScoutPattern).ThenByDescending(p => p.Watch ?? -1);
+                default: return profiles.OrderByDescending(p => p.ScoutPattern).ThenByDescending(p => p.Reporters).ThenByDescending(p => p.Watch ?? -1);
             }
         }
 
