@@ -4935,6 +4935,9 @@ namespace Server.Mobiles
             if (m is IConditionalVisibility && !((IConditionalVisibility)m).CanBeSeenBy(this))
                 return false;
 
+            if (Server.Services.BotWatch.InfoDenial.Hides(this, m))
+                return false;
+
             if (m is CharacterStatue statue)
             {
                 statue.OnRequestedAnimation(this);
