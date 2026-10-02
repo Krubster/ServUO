@@ -27,6 +27,7 @@ namespace Server.Services.BotWatch
         private const int ButtonRefresh = 4;
         private const int ButtonGoTo = 5;
         private const int ButtonList = 6;
+        private const int ButtonNetwork = 7;
 
         private readonly Serial m_Serial;
         private readonly View m_View;
@@ -264,22 +265,23 @@ namespace Server.Services.BotWatch
         {
             int y = Height - 40;
 
-            AddButtonLabel(20, y, ButtonOverview, "Overview", m_View == View.Overview);
-            AddButtonLabel(140, y, ButtonDaily, "Last 7 days", m_View == View.Daily);
-            AddButtonLabel(270, y, ButtonSessions, "Sessions", m_View == View.Sessions);
-            AddButtonLabel(390, y, ButtonRefresh, "Refresh", false);
+            AddButtonLabel(15, y, ButtonOverview, "Overview", m_View == View.Overview);
+            AddButtonLabel(120, y, ButtonDaily, "Last 7 days", m_View == View.Daily);
+            AddButtonLabel(235, y, ButtonSessions, "Sessions", m_View == View.Sessions);
+            AddButtonLabel(340, y, ButtonNetwork, "Network", false);
+            AddButtonLabel(445, y, ButtonRefresh, "Refresh", false);
 
             if (staff.AccessLevel >= AccessLevel.GameMaster && BotWatch.IsOnline(rec.Serial))
-                AddButtonLabel(500, y, ButtonGoTo, "Go to", false);
+                AddButtonLabel(545, y, ButtonGoTo, "Go to", false);
 
             if (m_FromList)
-                AddButtonLabel(610, y, ButtonList, "Back to list", false);
+                AddButtonLabel(640, y, ButtonList, "List", false);
         }
 
         private void AddButtonLabel(int x, int y, int id, string label, bool selected)
         {
             AddButton(x, y, 4005, 4007, id, GumpButtonType.Reply, 0);
-            AddHtml(x + 35, y + 2, 90, 20, Text(label, selected ? "#FFD080" : "#FFFFFF"), false, false);
+            AddHtml(x + 35, y + 2, 75, 20, Text(label, selected ? "#FFD080" : "#FFFFFF"), false, false);
         }
 
         public override void OnResponse(NetState sender, RelayInfo info)
@@ -316,6 +318,13 @@ namespace Server.Services.BotWatch
                 case ButtonList:
                     from.SendGump(new ProfilesGump(from, ProfilesGump.SortBy.Watch, 0));
                     break;
+                case ButtonNetwork:
+                    {
+                        if (BotWatch.Characters.TryGetValue(m_Serial, out CharacterRecord rec) && rec.Account != null)
+                            from.SendGump(new NetworkGump(from, rec.Account, 0));
+
+                        break;
+                    }
             }
         }
     }

@@ -41,6 +41,9 @@ namespace Server.Services.BotWatch
         private static readonly Dictionary<Mobile, LiveState> m_Live = new Dictionary<Mobile, LiveState>();
         private static DateTime m_LastScan = DateTime.UtcNow;
 
+        /// <summary>When BotWatch started collecting on this shard.</summary>
+        public static DateTime DataSince { get; private set; } = DateTime.UtcNow;
+
         public static int LiveCount => m_Live.Count;
         public static int PendingEncounterCount => m_Live.Values.Sum(l => l.Pending.Count);
 
@@ -67,6 +70,7 @@ namespace Server.Services.BotWatch
             public readonly List<PendingAttack> Attacks = new List<PendingAttack>();
 
             public DateTime TeleporterSince = DateTime.MinValue;
+            public int SessionOutdoorSeconds;
 
             public long CellsHour;
             public readonly HashSet<int> CellsSeen = new HashSet<int>();
@@ -112,6 +116,8 @@ namespace Server.Services.BotWatch
             SessionRetention = Config.Get("BotWatch.SessionRetention", TimeSpan.FromDays(90));
 
             Ratings.Configure();
+            Networks.Configure();
+            Alerts.Configure();
 
             EventSink.WorldSave += e => Save();
             EventSink.WorldLoad += Load;
@@ -125,6 +131,7 @@ namespace Server.Services.BotWatch
             SubscribeEvents();
 
             TeleporterIndex.Initialize();
+            Alerts.Initialize();
 
             Timer.DelayCall(ScanInterval, ScanInterval, Scan);
 
@@ -347,7 +354,13 @@ namespace Server.Services.BotWatch
 
             string address = m.NetState?.Address?.ToString() ?? "?";
 
+            // An account BotWatch has never seen. Only meaningful once BotWatch has been
+            // collecting long enough to have seen the shard's regular accounts.
+            bool firstSeen = now - DataSince >= TimeSpan.FromDays(Ratings.FreshDays) &&
+                             !Addresses.Values.Any(a => a.Account == live.Record.Account);
+
             live.Online = true;
+            live.SessionOutdoorSeconds = 0;
             live.LastMap = m.Map;
             live.InView.Clear();
             live.StepTiles.Clear();
@@ -376,6 +389,8 @@ namespace Server.Services.BotWatch
 
             ar.LastSeen = now;
             ar.Sessions++;
+
+            Alerts.CheckNewAccount(m, live.Record, address, firstSeen);
         }
 
         private static void EndSession(Mobile m)
@@ -458,7 +473,12 @@ namespace Server.Services.BotWatch
             bucket.OnlineSeconds += seconds;
 
             if (outdoor)
+            {
                 bucket.OutdoorSeconds += seconds;
+                live.SessionOutdoorSeconds += seconds;
+
+                Alerts.CheckFreshIdle(m, live.Record, live.Session, live.SessionOutdoorSeconds);
+            }
 
             // Moving to another facet raises no teleport event, so it is caught here.
             if (live.LastMap != null && live.LastMap != m.Map)
@@ -645,9 +665,11 @@ namespace Server.Services.BotWatch
             foreach (string key in Addresses.Where(kv => now - kv.Value.LastSeen > SessionRetention).Select(kv => kv.Key).ToList())
                 Addresses.Remove(key);
 
+            Alerts.Prune(now - SessionRetention);
+
             Persistence.Serialize(SavePath, writer =>
             {
-                writer.Write(0); // version
+                writer.Write(1); // version
 
                 writer.Write(Characters.Count);
 
@@ -663,6 +685,13 @@ namespace Server.Services.BotWatch
 
                 foreach (AddressRecord a in Addresses.Values)
                     a.Serialize(writer);
+
+                // version 1
+                writer.Write(DataSince);
+                writer.Write(Alerts.Recent.Count);
+
+                foreach (AlertRecord a in Alerts.Recent)
+                    a.Serialize(writer);
             });
         }
 
@@ -670,7 +699,7 @@ namespace Server.Services.BotWatch
         {
             Persistence.Deserialize(SavePath, reader =>
             {
-                reader.ReadInt(); // version
+                int version = reader.ReadInt();
 
                 int count = reader.ReadInt();
 
@@ -702,6 +731,28 @@ namespace Server.Services.BotWatch
                     AddressRecord a = new AddressRecord();
                     a.Deserialize(reader);
                     Addresses[a.Account + "|" + a.Address] = a;
+                }
+
+                if (version >= 1)
+                {
+                    DataSince = reader.ReadDateTime();
+
+                    count = reader.ReadInt();
+
+                    for (int i = 0; i < count; i++)
+                    {
+                        AlertRecord a = new AlertRecord();
+                        a.Deserialize(reader);
+                        Alerts.Recent.Add(a);
+                    }
+                }
+                else
+                {
+                    // Saved before DataSince existed: the earliest record is the best guess.
+                    DateTime earliest = Addresses.Values.Select(a => a.FirstSeen).DefaultIfEmpty(DateTime.UtcNow).Min();
+
+                    if (earliest < DataSince)
+                        DataSince = earliest;
                 }
             });
         }

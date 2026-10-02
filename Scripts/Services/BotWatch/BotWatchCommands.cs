@@ -11,6 +11,9 @@ namespace Server.Services.BotWatch
         {
             CommandSystem.Register("Profile", AccessLevel.Counselor, Profile_OnCommand);
             CommandSystem.Register("Profiles", AccessLevel.Counselor, Profiles_OnCommand);
+            CommandSystem.Register("Network", AccessLevel.Counselor, Network_OnCommand);
+            CommandSystem.Register("Networks", AccessLevel.Counselor, Networks_OnCommand);
+            CommandSystem.Register("BWAlerts", AccessLevel.Counselor, Alerts_OnCommand);
             CommandSystem.Register("BWStatus", AccessLevel.GameMaster, Status_OnCommand);
             CommandSystem.Register("BWActivity", AccessLevel.Counselor, Activity_OnCommand);
         }
@@ -27,6 +30,57 @@ namespace Server.Services.BotWatch
         private static void Profiles_OnCommand(CommandEventArgs e)
         {
             e.Mobile.SendGump(new ProfilesGump(e.Mobile, ProfilesGump.SortBy.Watch, 0));
+        }
+
+        [Usage("Network [character or account name]")]
+        [Description("Shows the accounts linked to a player's account. Targets if no name is given.")]
+        private static void Network_OnCommand(CommandEventArgs e)
+        {
+            if (e.Length > 0)
+            {
+                string name = e.ArgString.Trim();
+                CharacterRecord rec = BotWatch.FindRecord(name);
+                string account = rec != null ? rec.Account : null;
+
+                if (account == null)
+                {
+                    account = BotWatch.Characters.Values.Select(r => r.Account)
+                        .FirstOrDefault(a => String.Equals(a, name, StringComparison.OrdinalIgnoreCase));
+                }
+
+                if (account == null)
+                    e.Mobile.SendMessage("No BotWatch record for a character or account named '{0}'.", name);
+                else
+                    e.Mobile.SendGump(new NetworkGump(e.Mobile, account, 0));
+
+                return;
+            }
+
+            WithRecord(e, (from, rec) => from.SendGump(new NetworkGump(from, rec.Account, 0)));
+        }
+
+        [Usage("Networks")]
+        [Description("Lists every network of two or more linked accounts, most suspicious first.")]
+        private static void Networks_OnCommand(CommandEventArgs e)
+        {
+            e.Mobile.SendGump(new NetworksGump(e.Mobile, 0));
+        }
+
+        [Usage("BWAlerts [count]")]
+        [Description("Shows the most recent BotWatch alerts, newest first (default 15).")]
+        private static void Alerts_OnCommand(CommandEventArgs e)
+        {
+            int count = e.Length > 0 ? Math.Max(1, e.GetInt32(0)) : 15;
+            var alerts = Alerts.Recent.OrderByDescending(a => a.Time).Take(count).ToList();
+
+            if (alerts.Count == 0)
+            {
+                e.Mobile.SendMessage("No BotWatch alerts.");
+                return;
+            }
+
+            foreach (AlertRecord a in alerts.AsEnumerable().Reverse())
+                e.Mobile.SendMessage(0x35, "{0:MM-dd HH:mm} UTC: {1}", a.Time, a.Text);
         }
 
         [Usage("BWStatus")]
