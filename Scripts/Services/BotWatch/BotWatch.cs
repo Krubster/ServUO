@@ -121,6 +121,7 @@ namespace Server.Services.BotWatch
             Reports.Configure();
             Flags.Configure();
             GuildReactions.Configure();
+            InfoDenial.Configure();
 
             EventSink.WorldSave += e => Save();
             EventSink.WorldLoad += Load;
@@ -269,6 +270,8 @@ namespace Server.Services.BotWatch
 
                 if (live.Session != null && live.Session.Open)
                     live.Session.MeaningfulActions++;
+
+                InfoDenial.OnMeaningful(m);
             }
 
             if (!m_Passive.Contains(activity))
@@ -399,6 +402,8 @@ namespace Server.Services.BotWatch
 
         private static void EndSession(Mobile m)
         {
+            InfoDenial.OnDisconnect(m);
+
             if (m != null && m_Live.TryGetValue(m, out LiveState live))
                 CloseSession(m, live, DateTime.UtcNow);
         }
@@ -528,6 +533,8 @@ namespace Server.Services.BotWatch
             GuildReactions.Sample(m, now);
 
             ScanEncounters(m, live, now, outdoor);
+
+            InfoDenial.Tick(m, outdoor, live.LastMeaningful, now);
         }
 
         private static void ScanEncounters(Mobile m, LiveState live, DateTime now, bool outdoor)
@@ -538,13 +545,23 @@ namespace Server.Services.BotWatch
             {
                 IPooledEnumerable<Mobile> eable = m.Map.GetMobilesInRange(m.Location, Core.GlobalUpdateRange);
 
-                foreach (Mobile o in eable)
-                {
-                    if (IsEncounterCandidate(m, o))
-                        inView.Add(o);
-                }
+                // Count what the character would see without information denial, so a
+                // denied scout keeps its Watch score.
+                InfoDenial.Bypass = true;
 
-                eable.Free();
+                try
+                {
+                    foreach (Mobile o in eable)
+                    {
+                        if (IsEncounterCandidate(m, o))
+                            inView.Add(o);
+                    }
+                }
+                finally
+                {
+                    InfoDenial.Bypass = false;
+                    eable.Free();
+                }
             }
 
             foreach (Mobile o in inView)

@@ -149,6 +149,13 @@ namespace Server.Services.BotWatch
             if (p.Reporters > 0)
                 banner += Text(String.Format("   Reported by {0} player{1}", p.Reporters, p.Reporters == 1 ? "" : "s"), "#FFB040");
 
+            Mobile m = World.FindMobile(rec.Serial);
+
+            if (m != null && InfoDenial.IsDenied(m))
+                banner += Text("   Information denial active", "#FF5050");
+            else if (InfoDenial.IsCandidate(rec.Serial))
+                banner += Text("   Information denial when idle", "#FFB040");
+
             AddHtml(20, 64, Width - 40, 20, banner, false, false);
         }
 

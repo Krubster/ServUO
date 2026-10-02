@@ -12,7 +12,8 @@ namespace Server.Services.BotWatch
         FreshCharacterIdle,
         FreshWatchPattern,
         Report,
-        Flagged
+        Flagged,
+        InfoDenied
     }
 
     public class AlertRecord
@@ -229,6 +230,7 @@ namespace Server.Services.BotWatch
             }
 
             Flags.Check(profiles, null);
+            InfoDenial.Update(profiles);
         }
     }
 }

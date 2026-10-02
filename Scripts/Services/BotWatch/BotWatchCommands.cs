@@ -101,6 +101,10 @@ namespace Server.Services.BotWatch
                 BotWatch.Characters.Count, BotWatch.LiveCount, BotWatch.PendingEncounterCount);
             from.SendMessage("{0} sessions and {1} account/address pairs on record, {2} teleporter points indexed.",
                 BotWatch.Sessions.Count, BotWatch.Addresses.Count, TeleporterIndex.Count);
+            from.SendMessage("{0} open flags, {1} reports on record. Information denial {2}: {3} candidates, {4} currently denied{5}",
+                Flags.All.Count(f => f.Status == FlagStatus.Open), Reports.All.Count,
+                InfoDenial.Enabled ? "on" : "off", InfoDenial.CandidateCount, InfoDenial.DeniedCount,
+                InfoDenial.DeniedCount > 0 ? " (" + String.Join(", ", InfoDenial.Denied.Select(m => m.RawName)) + ")" : ".");
         }
 
         [Usage("BWActivity [name]")]
