@@ -31,7 +31,33 @@ namespace Server.Services.BotWatch
         BuffOther,
         PlayerTrade,
         LootPvM,
-        LootPvP
+        LootPvP,
+
+        PvMDeath,
+        Whisper,
+        Yell,
+        Emote,
+        GuildChat,
+        TravelJump,
+        TravelSpell,
+        DungeonEnter,
+        QuestComplete,
+        BODTaken,
+        BODTurnedIn,
+        Tame,
+        GuildJoin,
+        PartyJoin,
+        TargetPlayer,
+        AssistOther,
+        FastWalk,
+        ItemObtained,
+        Consume,
+        InterfaceUse,
+        HealthBarRequest,
+        RevealedOther,
+        RevealedByOther,
+        AttackedByPlayer,
+        AttackedNoResponse
     }
 
     public class HourBucket
@@ -43,6 +69,7 @@ namespace Server.Services.BotWatch
         public int OnlineSeconds;
         public int OutdoorSeconds;
         public int GhostOutdoorSeconds;
+        public int HiddenOutdoorSeconds;
         public int TeleporterIdleSeconds;
         public int Cells;
 
@@ -52,6 +79,20 @@ namespace Server.Services.BotWatch
         public int TeleporterEncounters;
         public int TeleporterIdleEncounters;
 
+        // Walking outside towns, in windows of 100 steps: how many distinct tiles each
+        // window covered. Looping a fixed path keeps this low.
+        public int Steps;
+        public int StepWindows;
+        public int StepWindowDistinct;
+
+        public int DamageDealtPvM;
+        public int DamageDealtPvP;
+        public int DamageTaken;
+        public int GoldGained;
+        public int GoldLost;
+
+        public int this[Activity a] => Counts[(int)a];
+
         public void Add(HourBucket b)
         {
             for (int i = 0; i < ActivityCount; i++)
@@ -60,6 +101,7 @@ namespace Server.Services.BotWatch
             OnlineSeconds += b.OnlineSeconds;
             OutdoorSeconds += b.OutdoorSeconds;
             GhostOutdoorSeconds += b.GhostOutdoorSeconds;
+            HiddenOutdoorSeconds += b.HiddenOutdoorSeconds;
             TeleporterIdleSeconds += b.TeleporterIdleSeconds;
             Cells += b.Cells;
             Encounters += b.Encounters;
@@ -67,11 +109,19 @@ namespace Server.Services.BotWatch
             ReactedEncounters += b.ReactedEncounters;
             TeleporterEncounters += b.TeleporterEncounters;
             TeleporterIdleEncounters += b.TeleporterIdleEncounters;
+            Steps += b.Steps;
+            StepWindows += b.StepWindows;
+            StepWindowDistinct += b.StepWindowDistinct;
+            DamageDealtPvM += b.DamageDealtPvM;
+            DamageDealtPvP += b.DamageDealtPvP;
+            DamageTaken += b.DamageTaken;
+            GoldGained += b.GoldGained;
+            GoldLost += b.GoldLost;
         }
 
         public void Serialize(GenericWriter writer)
         {
-            writer.Write(0); // version
+            writer.Write(1); // version
 
             writer.Write(ActivityCount);
 
@@ -88,11 +138,22 @@ namespace Server.Services.BotWatch
             writer.Write(ReactedEncounters);
             writer.Write(TeleporterEncounters);
             writer.Write(TeleporterIdleEncounters);
+
+            // version 1
+            writer.Write(HiddenOutdoorSeconds);
+            writer.Write(Steps);
+            writer.Write(StepWindows);
+            writer.Write(StepWindowDistinct);
+            writer.Write(DamageDealtPvM);
+            writer.Write(DamageDealtPvP);
+            writer.Write(DamageTaken);
+            writer.Write(GoldGained);
+            writer.Write(GoldLost);
         }
 
         public void Deserialize(GenericReader reader)
         {
-            reader.ReadInt(); // version
+            int version = reader.ReadInt();
 
             int count = reader.ReadInt();
 
@@ -114,6 +175,19 @@ namespace Server.Services.BotWatch
             ReactedEncounters = reader.ReadInt();
             TeleporterEncounters = reader.ReadInt();
             TeleporterIdleEncounters = reader.ReadInt();
+
+            if (version >= 1)
+            {
+                HiddenOutdoorSeconds = reader.ReadInt();
+                Steps = reader.ReadInt();
+                StepWindows = reader.ReadInt();
+                StepWindowDistinct = reader.ReadInt();
+                DamageDealtPvM = reader.ReadInt();
+                DamageDealtPvP = reader.ReadInt();
+                DamageTaken = reader.ReadInt();
+                GoldGained = reader.ReadInt();
+                GoldLost = reader.ReadInt();
+            }
         }
     }
 
@@ -128,6 +202,7 @@ namespace Server.Services.BotWatch
         public string Account;
         public DateTime CharacterCreated;
         public DateTime AccountCreated;
+        public DateTime Deleted = DateTime.MinValue;
 
         // Snapshot taken at the end of each session, for disposable-character signals.
         public int SkillsTotal;
@@ -135,6 +210,10 @@ namespace Server.Services.BotWatch
         public int BankItems;
 
         public readonly SortedDictionary<long, HourBucket> Hours = new SortedDictionary<long, HourBucket>();
+
+        public bool IsDeleted => Deleted != DateTime.MinValue;
+
+        public DateTime LastActive => Hours.Count > 0 ? new DateTime(Hours.Keys.Last() * TimeSpan.TicksPerHour, DateTimeKind.Utc) : DateTime.MinValue;
 
         public static long HourOf(DateTime utc)
         {
@@ -153,10 +232,16 @@ namespace Server.Services.BotWatch
 
         public HourBucket Sum(DateTime fromUtc)
         {
+            return Sum(fromUtc, DateTime.MaxValue);
+        }
+
+        public HourBucket Sum(DateTime fromUtc, DateTime toUtc)
+        {
             long from = HourOf(fromUtc);
+            long to = toUtc == DateTime.MaxValue ? Int64.MaxValue : HourOf(toUtc);
             HourBucket total = new HourBucket();
 
-            foreach (var kv in Hours.Where(kv => kv.Key >= from))
+            foreach (var kv in Hours.Where(kv => kv.Key >= from && kv.Key < to))
                 total.Add(kv.Value);
 
             return total;
@@ -172,7 +257,7 @@ namespace Server.Services.BotWatch
 
         public void Serialize(GenericWriter writer)
         {
-            writer.Write(0); // version
+            writer.Write(1); // version
 
             writer.Write(Serial.Value);
             writer.Write(Name);
@@ -190,11 +275,14 @@ namespace Server.Services.BotWatch
                 writer.Write(kv.Key);
                 kv.Value.Serialize(writer);
             }
+
+            // version 1
+            writer.Write(Deleted);
         }
 
         public void Deserialize(GenericReader reader)
         {
-            reader.ReadInt(); // version
+            int version = reader.ReadInt();
 
             Serial = (Serial)reader.ReadInt();
             Name = reader.ReadString();
@@ -214,6 +302,9 @@ namespace Server.Services.BotWatch
                 b.Deserialize(reader);
                 Hours[hour] = b;
             }
+
+            if (version >= 1)
+                Deleted = reader.ReadDateTime();
         }
     }
 
@@ -239,13 +330,26 @@ namespace Server.Services.BotWatch
         public Point3D EndLocation;
         public bool EndInTown;
 
+        public int MeaningfulActions;
+
         public bool Open => End == DateTime.MinValue;
 
-        public TimeSpan Duration => (Open ? LastSeen : End) - Start;
+        public DateTime EndOrLastSeen => Open ? LastSeen : End;
+
+        public TimeSpan Duration => EndOrLastSeen - Start;
+
+        /// <summary>
+        /// Started and ended outside towns at (nearly) the same spot: the character was
+        /// switched on at its post and switched off again without going anywhere.
+        /// </summary>
+        public bool IsParked(int range)
+        {
+            return !Open && !StartInTown && !EndInTown && StartMap == EndMap && Utility.InRange(StartLocation, EndLocation, range);
+        }
 
         public void Serialize(GenericWriter writer)
         {
-            writer.Write(0); // version
+            writer.Write(1); // version
 
             writer.Write(Account);
             writer.Write(Character.Value);
@@ -260,11 +364,14 @@ namespace Server.Services.BotWatch
             writer.Write(EndMap);
             writer.Write(EndLocation);
             writer.Write(EndInTown);
+
+            // version 1
+            writer.Write(MeaningfulActions);
         }
 
         public void Deserialize(GenericReader reader)
         {
-            reader.ReadInt(); // version
+            int version = reader.ReadInt();
 
             Account = reader.ReadString();
             Character = (Serial)reader.ReadInt();
@@ -279,6 +386,9 @@ namespace Server.Services.BotWatch
             EndMap = reader.ReadMap();
             EndLocation = reader.ReadPoint3D();
             EndInTown = reader.ReadBool();
+
+            if (version >= 1)
+                MeaningfulActions = reader.ReadInt();
         }
     }
 

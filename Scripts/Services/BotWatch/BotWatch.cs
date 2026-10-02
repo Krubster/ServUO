@@ -1,10 +1,8 @@
 using Server.Accounting;
-using Server.Commands;
 using Server.Engines.PartySystem;
 using Server.Guilds;
 using Server.Items;
 using Server.Mobiles;
-using Server.Network;
 using Server.Regions;
 using System;
 using System.Collections.Generic;
@@ -16,10 +14,13 @@ namespace Server.Services.BotWatch
     /// <summary>
     /// Records what player characters do, whom they see and when they play, so staff can
     /// tell real players from scout bots. Observe-only. Configured in Config/BotWatch.cfg.
+    /// Event subscriptions and hook handlers are in BotWatchEvents.cs.
     /// </summary>
-    public static class BotWatch
+    public static partial class BotWatch
     {
         public static readonly string SavePath = Path.Combine("Saves", "BotWatch", "BotWatch.bin");
+
+        private const int StepWindow = 100;
 
         public static bool Enabled { get; private set; }
         public static TimeSpan ScanInterval { get; private set; }
@@ -44,26 +45,34 @@ namespace Server.Services.BotWatch
         public static int PendingEncounterCount => m_Live.Values.Sum(l => l.Pending.Count);
 
         /// <summary>
-        /// Runtime state of a character that is online, or offline with encounters still
-        /// waiting for their idle window to pass.
+        /// Runtime state of a character that is online, or offline with encounters or
+        /// attacks still waiting to be resolved.
         /// </summary>
         private class LiveState
         {
             public CharacterRecord Record;
             public SessionRecord Session;
             public bool Online;
+            public Map LastMap;
 
             public readonly List<DateTime> Meaningful = new List<DateTime>();
             public DateTime LastMeaningful = DateTime.MinValue;
+            public DateTime LastResponse = DateTime.MinValue;
 
             public HashSet<Mobile> InView = new HashSet<Mobile>();
             public readonly Dictionary<Serial, DateTime> LastEncounter = new Dictionary<Serial, DateTime>();
             public readonly List<PendingEncounter> Pending = new List<PendingEncounter>();
 
+            public readonly Dictionary<Serial, DateTime> LastAttackedBy = new Dictionary<Serial, DateTime>();
+            public readonly List<PendingAttack> Attacks = new List<PendingAttack>();
+
             public DateTime TeleporterSince = DateTime.MinValue;
 
             public long CellsHour;
             public readonly HashSet<int> CellsSeen = new HashSet<int>();
+
+            public Map StepMap;
+            public readonly List<int> StepTiles = new List<int>(StepWindow);
         }
 
         private class PendingEncounter
@@ -74,6 +83,14 @@ namespace Server.Services.BotWatch
             public Point3D Location;
             public bool NearTeleporter;
             public bool Reacted;
+        }
+
+        private class PendingAttack
+        {
+            public DateTime Time;
+            public Map Map;
+            public Point3D Location;
+            public bool Moved;
         }
 
         public static void Configure()
@@ -94,6 +111,8 @@ namespace Server.Services.BotWatch
             ActivityRetention = Config.Get("BotWatch.ActivityRetention", TimeSpan.FromDays(30));
             SessionRetention = Config.Get("BotWatch.SessionRetention", TimeSpan.FromDays(90));
 
+            Ratings.Configure();
+
             EventSink.WorldSave += e => Save();
             EventSink.WorldLoad += Load;
         }
@@ -103,21 +122,7 @@ namespace Server.Services.BotWatch
             if (!Enabled)
                 return;
 
-            EventSink.Login += OnLogin;
-            EventSink.Disconnected += OnDisconnected;
-
-            EventSink.AggressiveAction += OnAggressiveAction;
-            EventSink.CreatureDeath += e => OnKill(e.Killer, e.Creature);
-            EventSink.PlayerDeath += OnPlayerDeath;
-            EventSink.CraftSuccess += e => Record(e.Crafter, Activity.Craft);
-            EventSink.ResourceHarvestSuccess += e => Record(e.Harvester, Activity.Gather);
-            EventSink.ValidVendorPurchase += e => Record(e.Mobile, Activity.Trade);
-            EventSink.ValidVendorSell += e => Record(e.Mobile, Activity.Trade);
-            EventSink.SkillGain += e => Record(e.From, Activity.SkillGain);
-            EventSink.SkillCheck += e => Record(e.From, Activity.SkillUse);
-            EventSink.CastSpellRequest += e => Record(e.Mobile, Activity.Spell);
-            EventSink.OnItemUse += e => Record(e.From, Activity.ItemUse);
-            EventSink.Speech += OnSpeech;
+            SubscribeEvents();
 
             TeleporterIndex.Initialize();
 
@@ -134,14 +139,27 @@ namespace Server.Services.BotWatch
 
         /// <summary>
         /// Activities that count against idleness. Self-heals, self-buffs, skill use, spells,
-        /// item use and speech are left out because a bot can repeat them at its post.
+        /// item use, travel and speech are left out because a bot can repeat them at its post.
         /// </summary>
         private static readonly HashSet<Activity> m_Meaningful = new HashSet<Activity>
         {
             Activity.PvMAttack, Activity.PvMKill, Activity.PvPAttack, Activity.PvPKill,
             Activity.Craft, Activity.Gather, Activity.Trade,
             Activity.HealOther, Activity.BuffOther, Activity.PlayerTrade,
-            Activity.LootPvM, Activity.LootPvP
+            Activity.LootPvM, Activity.LootPvP,
+            Activity.QuestComplete, Activity.BODTaken, Activity.BODTurnedIn, Activity.Tame,
+            Activity.TargetPlayer, Activity.AssistOther, Activity.RevealedOther
+        };
+
+        /// <summary>
+        /// Things that happen to a character rather than things it does. Everything else
+        /// counts as a response when the character is attacked.
+        /// </summary>
+        private static readonly HashSet<Activity> m_Passive = new HashSet<Activity>
+        {
+            Activity.SkillGain, Activity.PvPDeath, Activity.PvMDeath, Activity.ItemObtained,
+            Activity.AttackedByPlayer, Activity.AttackedNoResponse, Activity.RevealedByOther,
+            Activity.FastWalk, Activity.DungeonEnter, Activity.GuildJoin, Activity.PartyJoin
         };
 
         public static bool IsMeaningful(Activity a)
@@ -186,8 +204,15 @@ namespace Server.Services.BotWatch
         {
             return Characters.Values
                 .Where(r => String.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(r => r.Hours.Count > 0 ? r.Hours.Keys.Last() : 0)
+                .OrderByDescending(r => r.LastActive)
                 .FirstOrDefault();
+        }
+
+        public static bool IsOnline(Serial s)
+        {
+            Mobile m = World.FindMobile(s);
+
+            return m != null && m_Live.TryGetValue(m, out LiveState live) && live.Online;
         }
 
         private static LiveState GetLive(Mobile m)
@@ -210,8 +235,13 @@ namespace Server.Services.BotWatch
         }
         #endregion
 
-        #region Activity events
+        #region Recording
         public static void Record(Mobile m, Activity activity)
+        {
+            Record(m, activity, 1);
+        }
+
+        public static void Record(Mobile m, Activity activity, int amount)
         {
             if (!IsTracked(m))
                 return;
@@ -219,60 +249,19 @@ namespace Server.Services.BotWatch
             DateTime now = DateTime.UtcNow;
             LiveState live = GetLive(m);
 
-            live.Record.GetHour(now).Counts[(int)activity]++;
+            live.Record.GetHour(now).Counts[(int)activity] += amount;
 
             if (IsMeaningful(activity))
             {
                 live.Meaningful.Add(now);
                 live.LastMeaningful = now;
+
+                if (live.Session != null && live.Session.Open)
+                    live.Session.MeaningfulActions++;
             }
-        }
 
-        private static void OnAggressiveAction(AggressiveActionEventArgs e)
-        {
-            Mobile aggressor = Owner(e.Aggressor);
-            Mobile aggressed = e.Aggressed;
-
-            if (!IsTracked(aggressor) || aggressed == null || aggressor == aggressed)
-                return;
-
-            Mobile victimOwner = Owner(aggressed);
-
-            if (IsTracked(victimOwner))
-            {
-                Record(aggressor, Activity.PvPAttack);
-                MarkReaction(aggressor, victimOwner);
-            }
-            else if (aggressed is BaseCreature)
-            {
-                Record(aggressor, Activity.PvMAttack);
-            }
-        }
-
-        private static void OnKill(Mobile killer, Mobile victim)
-        {
-            Mobile owner = Owner(killer);
-
-            if (IsTracked(owner) && victim is BaseCreature)
-                Record(owner, Activity.PvMKill);
-        }
-
-        private static void OnPlayerDeath(PlayerDeathEventArgs e)
-        {
-            Record(e.Mobile, Activity.PvPDeath);
-
-            Mobile killer = Owner(e.Killer);
-
-            if (IsTracked(killer) && killer != e.Mobile)
-                Record(killer, Activity.PvPKill);
-        }
-
-        private static void OnSpeech(SpeechEventArgs e)
-        {
-            if (e.Speech != null && e.Speech.StartsWith(CommandSystem.Prefix))
-                return;
-
-            Record(e.Mobile, Activity.Speech);
+            if (!m_Passive.Contains(activity))
+                live.LastResponse = now;
         }
 
         /// <summary>
@@ -292,88 +281,61 @@ namespace Server.Services.BotWatch
                     p.Reacted = true;
             }
         }
-        #endregion
-
-        #region Handlers for hooks without an EventSink event
-        // ServUO raises no event for these. Call the handlers from the places noted below.
 
         /// <summary>
-        /// A heal landed. Call where hits are restored with a known source, e.g.
-        /// Mobile.Heal(int amount, Mobile from, bool message) in Server/Mobile.cs, which
-        /// bandages, potions and SpellHelper.Heal all go through.
+        /// A player attacked this character. Whether it responds is resolved after the
+        /// reaction window; one attack per attacker is counted every two minutes.
         /// </summary>
-        public static void OnHeal(Mobile healer, Mobile target, int amount)
+        private static void RecordAttacked(Mobile victim, Mobile attacker)
         {
-            healer = Owner(healer);
-
-            if (!IsTracked(healer) || target == null || amount <= 0)
+            if (!IsTracked(victim) || !IsTracked(attacker))
                 return;
 
-            if (healer == target)
+            DateTime now = DateTime.UtcNow;
+            LiveState live = GetLive(victim);
+
+            if (live.LastAttackedBy.TryGetValue(attacker.Serial, out DateTime last) && now - last < TimeSpan.FromMinutes(2))
+                return;
+
+            live.LastAttackedBy[attacker.Serial] = now;
+
+            Record(victim, Activity.AttackedByPlayer);
+
+            live.Attacks.Add(new PendingAttack { Time = now, Map = victim.Map, Location = victim.Location });
+        }
+
+        /// <summary>
+        /// One step outside towns. Steps are grouped in windows of 100 and each window
+        /// records how many distinct tiles it covered.
+        /// </summary>
+        private static void RecordStep(Mobile m)
+        {
+            if (!IsTracked(m) || !m_Live.TryGetValue(m, out LiveState live) || !live.Online || IsSafe(m))
+                return;
+
+            if (live.StepMap != m.Map)
             {
-                Record(healer, Activity.HealSelf);
-                return;
+                live.StepMap = m.Map;
+                live.StepTiles.Clear();
             }
 
-            Record(healer, Activity.HealOther);
-            MarkReaction(healer, Owner(target));
-        }
+            HourBucket bucket = live.Record.GetHour(DateTime.UtcNow);
 
-        /// <summary>
-        /// A beneficial effect (buff, cure, protection...) was applied. Call from
-        /// BuffInfo.AddBuff in Scripts/Misc/BuffIcons.cs or from the individual spells.
-        /// </summary>
-        public static void OnBuff(Mobile caster, Mobile target)
-        {
-            caster = Owner(caster);
+            bucket.Steps++;
+            live.StepTiles.Add((m.X << 16) | m.Y);
 
-            if (!IsTracked(caster) || target == null)
-                return;
-
-            if (caster == target)
+            if (live.StepTiles.Count >= StepWindow)
             {
-                Record(caster, Activity.BuffSelf);
-                return;
+                bucket.StepWindows++;
+                bucket.StepWindowDistinct += live.StepTiles.Distinct().Count();
+                live.StepTiles.Clear();
             }
-
-            Record(caster, Activity.BuffOther);
-            MarkReaction(caster, Owner(target));
-        }
-
-        /// <summary>
-        /// A secure trade between two players completed. Call from SecureTrade.Update in
-        /// Server/SecureTrade.cs once both sides accepted and items were exchanged.
-        /// </summary>
-        public static void OnPlayerTrade(Mobile a, Mobile b)
-        {
-            if (a == null || b == null || a == b)
-                return;
-
-            Record(a, Activity.PlayerTrade);
-            Record(b, Activity.PlayerTrade);
-
-            MarkReaction(a, b);
-            MarkReaction(b, a);
-        }
-
-        /// <summary>
-        /// An item was taken from a corpse. Call from Corpse.OnItemLifted in
-        /// Scripts/Items/Corpses/Corpse.cs. Looting your own corpse is not counted.
-        /// </summary>
-        public static void OnCorpseLoot(Mobile looter, Corpse corpse, Item item)
-        {
-            if (!IsTracked(looter) || corpse == null || corpse.Owner == looter)
-                return;
-
-            Record(looter, corpse.Owner is PlayerMobile ? Activity.LootPvP : Activity.LootPvM);
         }
         #endregion
 
         #region Sessions
-        private static void OnLogin(LoginEventArgs e)
+        private static void StartSession(Mobile m)
         {
-            Mobile m = e.Mobile;
-
             if (!IsTracked(m))
                 return;
 
@@ -386,7 +348,9 @@ namespace Server.Services.BotWatch
             string address = m.NetState?.Address?.ToString() ?? "?";
 
             live.Online = true;
+            live.LastMap = m.Map;
             live.InView.Clear();
+            live.StepTiles.Clear();
             live.Session = new SessionRecord
             {
                 Account = live.Record.Account,
@@ -414,14 +378,10 @@ namespace Server.Services.BotWatch
             ar.Sessions++;
         }
 
-        private static void OnDisconnected(DisconnectedEventArgs e)
+        private static void EndSession(Mobile m)
         {
-            Mobile m = e.Mobile;
-
-            if (m == null || !m_Live.TryGetValue(m, out LiveState live))
-                return;
-
-            CloseSession(m, live, DateTime.UtcNow);
+            if (m != null && m_Live.TryGetValue(m, out LiveState live))
+                CloseSession(m, live, DateTime.UtcNow);
         }
 
         private static void CloseSession(Mobile m, LiveState live, DateTime now)
@@ -472,13 +432,17 @@ namespace Server.Services.BotWatch
                     ScanOnline(m, live, now, seconds);
 
                 ResolveEncounters(m, live, now);
+                ResolveAttacks(m, live, now);
 
                 live.Meaningful.RemoveAll(t => now - t > IdleWindow + IdleWindow);
 
                 foreach (Serial s in live.LastEncounter.Where(p => now - p.Value > EncounterCooldown).Select(p => p.Key).ToList())
                     live.LastEncounter.Remove(s);
 
-                if (!live.Online && live.Pending.Count == 0)
+                foreach (Serial s in live.LastAttackedBy.Where(p => now - p.Value > TimeSpan.FromMinutes(2)).Select(p => p.Key).ToList())
+                    live.LastAttackedBy.Remove(s);
+
+                if (!live.Online && live.Pending.Count == 0 && live.Attacks.Count == 0)
                     m_Live.Remove(m);
             }
         }
@@ -496,6 +460,12 @@ namespace Server.Services.BotWatch
             if (outdoor)
                 bucket.OutdoorSeconds += seconds;
 
+            // Moving to another facet raises no teleport event, so it is caught here.
+            if (live.LastMap != null && live.LastMap != m.Map)
+                Record(m, Activity.TravelJump);
+
+            live.LastMap = m.Map;
+
             // Exploration: distinct 16x16 areas visited this hour.
             long hour = CharacterRecord.HourOf(now);
 
@@ -508,8 +478,11 @@ namespace Server.Services.BotWatch
             if (live.CellsSeen.Add((m.Map.MapID << 24) | ((m.X >> 4) << 12) | (m.Y >> 4)))
                 bucket.Cells++;
 
-            if (!m.Alive && outdoor)
+            if (outdoor && !m.Alive)
                 bucket.GhostOutdoorSeconds += seconds;
+
+            if (outdoor && m.Hidden)
+                bucket.HiddenOutdoorSeconds += seconds;
 
             // Idle presence near a teleporter. Walking around it does not reset this, only
             // leaving its range or doing something meaningful does.
@@ -594,6 +567,11 @@ namespace Server.Services.BotWatch
             return true;
         }
 
+        private static bool MovedAway(Mobile m, LiveState live, Map map, Point3D location)
+        {
+            return live.Online && (m.Map != map || !Utility.InRange(m.Location, location, ReactionMoveTiles));
+        }
+
         private static void ResolveEncounters(Mobile m, LiveState live, DateTime now)
         {
             for (int i = live.Pending.Count - 1; i >= 0; i--)
@@ -602,11 +580,8 @@ namespace Server.Services.BotWatch
 
                 // Leaving the spot (walking away, recalling, gating) right after seeing
                 // someone counts as reacting to them.
-                if (!p.Reacted && live.Online && now - p.Time <= ReactionWindow &&
-                    (m.Map != p.Map || !Utility.InRange(m.Location, p.Location, ReactionMoveTiles)))
-                {
+                if (!p.Reacted && now - p.Time <= ReactionWindow && MovedAway(m, live, p.Map, p.Location))
                     p.Reacted = true;
-                }
 
                 if (now - p.Time < IdleWindow)
                     continue;
@@ -631,6 +606,25 @@ namespace Server.Services.BotWatch
                 }
 
                 live.Pending.RemoveAt(i);
+            }
+        }
+
+        private static void ResolveAttacks(Mobile m, LiveState live, DateTime now)
+        {
+            for (int i = live.Attacks.Count - 1; i >= 0; i--)
+            {
+                PendingAttack p = live.Attacks[i];
+
+                if (!p.Moved && MovedAway(m, live, p.Map, p.Location))
+                    p.Moved = true;
+
+                if (now - p.Time < ReactionWindow)
+                    continue;
+
+                if (!p.Moved && live.LastResponse < p.Time)
+                    live.Record.GetHour(p.Time).Counts[(int)Activity.AttackedNoResponse]++;
+
+                live.Attacks.RemoveAt(i);
             }
         }
         #endregion
