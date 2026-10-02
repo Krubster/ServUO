@@ -257,6 +257,10 @@ namespace Server.Services.BotWatch
         /// <summary>The most recent resolved encounters, oldest first.</summary>
         public readonly List<EncounterNote> RecentEncounters = new List<EncounterNote>();
 
+        /// <summary>Guilds that converged after this character's idle encounters, and at random moments.</summary>
+        public readonly List<GuildCheck> GuildChecks = new List<GuildCheck>();
+        public readonly List<GuildCheck> GuildBaseline = new List<GuildCheck>();
+
         public void AddEncounter(EncounterNote note)
         {
             RecentEncounters.Add(note);
@@ -307,11 +311,15 @@ namespace Server.Services.BotWatch
 
             foreach (long hour in Hours.Keys.Where(h => h < cutoff).ToList())
                 Hours.Remove(hour);
+
+            RecentEncounters.RemoveAll(e => e.Time < cutoffUtc);
+            GuildChecks.RemoveAll(c => c.Time < cutoffUtc);
+            GuildBaseline.RemoveAll(c => c.Time < cutoffUtc);
         }
 
         public void Serialize(GenericWriter writer)
         {
-            writer.Write(2); // version
+            writer.Write(3); // version
 
             writer.Write(Serial.Value);
             writer.Write(Name);
@@ -338,6 +346,17 @@ namespace Server.Services.BotWatch
 
             foreach (EncounterNote note in RecentEncounters)
                 note.Serialize(writer);
+
+            // version 3
+            writer.Write(GuildChecks.Count);
+
+            foreach (GuildCheck c in GuildChecks)
+                c.Serialize(writer);
+
+            writer.Write(GuildBaseline.Count);
+
+            foreach (GuildCheck c in GuildBaseline)
+                c.Serialize(writer);
         }
 
         public void Deserialize(GenericReader reader)
@@ -376,6 +395,19 @@ namespace Server.Services.BotWatch
                     note.Deserialize(reader);
                     RecentEncounters.Add(note);
                 }
+            }
+
+            if (version >= 3)
+            {
+                count = reader.ReadInt();
+
+                for (int i = 0; i < count; i++)
+                    GuildChecks.Add(GuildCheck.Deserialize(reader));
+
+                count = reader.ReadInt();
+
+                for (int i = 0; i < count; i++)
+                    GuildBaseline.Add(GuildCheck.Deserialize(reader));
             }
         }
     }

@@ -120,6 +120,7 @@ namespace Server.Services.BotWatch
             Alerts.Configure();
             Reports.Configure();
             Flags.Configure();
+            GuildReactions.Configure();
 
             EventSink.WorldSave += e => Save();
             EventSink.WorldLoad += Load;
@@ -463,6 +464,8 @@ namespace Server.Services.BotWatch
                 if (!live.Online && live.Pending.Count == 0 && live.Attacks.Count == 0)
                     m_Live.Remove(m);
             }
+
+            GuildReactions.Process(now);
         }
 
         private static void ScanOnline(Mobile m, LiveState live, DateTime now, int seconds)
@@ -521,6 +524,8 @@ namespace Server.Services.BotWatch
             {
                 live.TeleporterSince = DateTime.MinValue;
             }
+
+            GuildReactions.Sample(m, now);
 
             ScanEncounters(m, live, now, outdoor);
         }
@@ -630,7 +635,7 @@ namespace Server.Services.BotWatch
 
                 Mobile other = World.FindMobile(p.Other);
 
-                live.Record.AddEncounter(new EncounterNote
+                EncounterNote note = new EncounterNote
                 {
                     Time = p.Time,
                     Map = p.Map,
@@ -640,7 +645,12 @@ namespace Server.Services.BotWatch
                     Idle = idle,
                     Reacted = p.Reacted,
                     NearTeleporter = p.NearTeleporter
-                });
+                };
+
+                live.Record.AddEncounter(note);
+
+                if (idle)
+                    GuildReactions.OnIdleEncounter(m, live.Record, note);
 
                 live.Pending.RemoveAt(i);
             }

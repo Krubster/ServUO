@@ -197,6 +197,11 @@ namespace Server.Services.BotWatch
                 if (p.Reporters >= Reports.FlagThreshold)
                     reasons.Add(String.Format("Reported by {0} players", p.Reporters));
 
+                GuildResponse guild = p.GuildResponses.FirstOrDefault(r => r.Significant);
+
+                if (guild != null)
+                    reasons.Add(String.Format("Guild response ({0} after {1} of {2} idle encounters, {3:F1}x usual)", guild.Name, guild.Responses, guild.Checks, guild.Lift));
+
                 if (reasons.Count == 0)
                     continue;
 
@@ -399,6 +404,15 @@ namespace Server.Services.BotWatch
                         l.Add(String.Format("{0}{1}: {2}", account, info.IsFresh ? " (new)" : "", String.Join(", ", info.Characters.Select(c => c.Name))));
                 }
             }
+
+            l.Add(String.Empty);
+            l.Add("== Guild responses (guilds arriving after idle encounters, against their usual rate at those spots)");
+
+            foreach (GuildResponse r in p.GuildResponses.Take(5))
+                l.Add((r.Significant ? "SIGNIFICANT: " : "") + r.Describe());
+
+            if (p.GuildResponses.Count == 0)
+                l.Add(rec.GuildChecks.Count > 0 ? "no guild arrived after its idle encounters" : "no idle encounters checked yet");
 
             l.Add(String.Empty);
             l.Add("== Player reports");

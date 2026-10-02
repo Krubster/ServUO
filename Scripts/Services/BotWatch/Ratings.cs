@@ -57,6 +57,7 @@ namespace Server.Services.BotWatch
         public int SessionCount;
         public int Reports;
         public int Reporters;
+        public List<GuildResponse> GuildResponses = new List<GuildResponse>();
         public readonly List<DayStats> Days = new List<DayStats>();
         public readonly List<string> Notes = new List<string>();
 
@@ -163,6 +164,7 @@ namespace Server.Services.BotWatch
             p.InPopulation = p.OnlineHours >= MinOnlineHours;
             p.Reports = Reports.For(rec.Serial, from).Count();
             p.Reporters = Reports.DistinctReporters(rec.Serial, from);
+            p.GuildResponses = GuildReactions.Stats(rec, from);
 
             ComputeRaw(p, b);
             ComputeWatch(p, b);
@@ -181,6 +183,9 @@ namespace Server.Services.BotWatch
 
             if (rec.IsDeleted)
                 p.Notes.Add(String.Format("Character deleted on {0:yyyy-MM-dd}.", rec.Deleted));
+
+            foreach (GuildResponse r in p.GuildResponses.Where(r => r.Significant))
+                p.Notes.Add("Guild response: " + r.Describe() + ".");
 
             if (p.Reports > 0)
                 p.Notes.Add(String.Format("Reported {0} times by {1} players.", p.Reports, p.Reporters));
