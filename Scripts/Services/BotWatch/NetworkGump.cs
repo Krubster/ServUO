@@ -55,7 +55,7 @@ namespace Server.Services.BotWatch
             int characters = accounts.Sum(a => g.Accounts.TryGetValue(a, out AccountInfo i) ? i.Characters.Count : 0);
 
             AddHtml(20, 18, Width - 40, 20, ProfileGump.Text(String.Format("<BIG>Network of {0}</BIG>   {1} account{2}, {3} characters",
-                account, accounts.Count, accounts.Count == 1 ? "" : "s", characters), "#FFD080"), false, false);
+                ProfileGump.Escape(account), accounts.Count, accounts.Count == 1 ? "" : "s", characters), "#FFD080"), false, false);
 
             AddHtml(20, 42, Width - 40, 20, ProfileGump.Text(accounts.Count == 1
                 ? "No linked accounts: no shared IP and no sessions that start and end together."
@@ -93,15 +93,14 @@ namespace Server.Services.BotWatch
                 ? String.Format("first seen {0}, last seen {1}, {2} IP{3}", Networks.Ago(info.FirstSeen), Networks.Ago(info.LastSeen), info.Addresses.Count, info.Addresses.Count == 1 ? "" : "s")
                 : "no sessions on record";
 
-            AddImageTiled(20, y, Width - 40, 1, 9304);
-            AddHtml(20, y + 4, Width - 40, 20, ProfileGump.Text(String.Format("<BIG>{0}</BIG>{1}   {2} | {3}", account, fresh, created, seen),
+            AddHtml(20, y + 4, Width - 40, 20, ProfileGump.Text(String.Format("<BIG>{0}</BIG>{1}   {2} | {3}", ProfileGump.Escape(account), fresh, created, seen),
                 info != null && info.IsFresh ? "#FFB040" : "#FFFFFF"), false, false);
 
             y += 28;
 
             foreach (AccountLink link in g.LinksOf(account).OrderByDescending(l => l.LastShared).Take(MaxLinks))
             {
-                AddHtml(35, y, Width - 55, 18, ProfileGump.Text(String.Format("linked to {0}: {1}", link.Other(account), link.Describe()), "#A0A0A0"), false, false);
+                AddHtml(35, y, Width - 55, 18, ProfileGump.Text(ProfileGump.Escape(String.Format("linked to {0}: {1}", link.Other(account), link.Describe())), "#A0A0A0"), false, false);
                 y += 18;
             }
 
@@ -126,7 +125,7 @@ namespace Server.Services.BotWatch
                 string state = rec.IsDeleted ? " (deleted)" : BotWatch.IsOnline(rec.Serial) ? " *" : String.Empty;
 
                 AddButton(35, y + 2, 4011, 4012, ButtonCharacterBase + index, GumpButtonType.Reply, 0);
-                AddHtml(70, y + 4, 170, 20, ProfileGump.Text(rec.Name + state), false, false);
+                AddHtml(70, y + 4, 170, 20, ProfileGump.Text(ProfileGump.Escape(rec.Name) + state), false, false);
 
                 if (p != null)
                 {
@@ -268,7 +267,7 @@ namespace Server.Services.BotWatch
                 double? maxSession = row.MaxSession >= 0 ? row.MaxSession : (double?)null;
 
                 AddButton(20, y, 4011, 4012, ButtonNetworkBase + index, GumpButtonType.Reply, 0);
-                AddHtml(cols[0], y + 2, 300, 20, ProfileGump.Text(names), false, false);
+                AddHtml(cols[0], y + 2, 300, 20, ProfileGump.Text(ProfileGump.Escape(names)), false, false);
                 AddHtml(cols[1], y + 2, 70, 20, ProfileGump.Text(row.Characters.ToString(), "#C0C0C0"), false, false);
                 AddHtml(cols[2], y + 2, 50, 20, ProfileGump.Text(row.Fresh.ToString(), row.Fresh > 0 ? "#FFB040" : "#C0C0C0"), false, false);
                 AddHtml(cols[3], y + 2, 60, 20, ProfileGump.Text(row.Scouts.ToString(), row.Scouts > 0 ? "#FF5050" : "#C0C0C0"), false, false);

@@ -205,7 +205,7 @@ namespace Server.Services.BotWatch
 
         public static string Escape(string text)
         {
-            return (text ?? String.Empty).Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+            return ProfileGump.Escape(text);
         }
 
         public static string StatusColor(FlagStatus status)

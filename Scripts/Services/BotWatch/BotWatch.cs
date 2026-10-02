@@ -71,6 +71,7 @@ namespace Server.Services.BotWatch
 
             public DateTime TeleporterSince = DateTime.MinValue;
             public int SessionOutdoorSeconds;
+            public bool FreshIdleAlerted;
 
             public long CellsHour;
             public readonly HashSet<int> CellsSeen = new HashSet<int>();
@@ -144,6 +145,30 @@ namespace Server.Services.BotWatch
         }
 
         #region Helpers
+        private static DateTime m_ErrorHour;
+        private static int m_ErrorCount;
+
+        /// <summary>
+        /// BotWatch must never take the shard down or break a player's action: every entry
+        /// point catches its own errors and reports them here (at most 20 per hour).
+        /// </summary>
+        public static void LogError(Exception e)
+        {
+            DateTime now = DateTime.UtcNow;
+
+            if (now - m_ErrorHour > TimeSpan.FromHours(1))
+            {
+                m_ErrorHour = now;
+                m_ErrorCount = 0;
+            }
+
+            if (++m_ErrorCount > 20)
+                return;
+
+            Utility.WriteConsoleColor(ConsoleColor.Red, "BotWatch error: {0}", e.Message);
+            Diagnostics.ExceptionLogging.LogException(e);
+        }
+
         public static bool IsTracked(Mobile m)
         {
             return m is PlayerMobile && !m.Deleted && m.AccessLevel == AccessLevel.Player;
@@ -258,24 +283,31 @@ namespace Server.Services.BotWatch
             if (!IsTracked(m))
                 return;
 
-            DateTime now = DateTime.UtcNow;
-            LiveState live = GetLive(m);
-
-            live.Record.GetHour(now).Counts[(int)activity] += amount;
-
-            if (IsMeaningful(activity))
+            try
             {
-                live.Meaningful.Add(now);
-                live.LastMeaningful = now;
+                DateTime now = DateTime.UtcNow;
+                LiveState live = GetLive(m);
 
-                if (live.Session != null && live.Session.Open)
-                    live.Session.MeaningfulActions++;
+                live.Record.GetHour(now).Counts[(int)activity] += amount;
 
-                InfoDenial.OnMeaningful(m);
+                if (IsMeaningful(activity))
+                {
+                    live.Meaningful.Add(now);
+                    live.LastMeaningful = now;
+
+                    if (live.Session != null && live.Session.Open)
+                        live.Session.MeaningfulActions++;
+
+                    InfoDenial.OnMeaningful(m);
+                }
+
+                if (!m_Passive.Contains(activity))
+                    live.LastResponse = now;
             }
-
-            if (!m_Passive.Contains(activity))
-                live.LastResponse = now;
+            catch (Exception e)
+            {
+                LogError(e);
+            }
         }
 
         /// <summary>
@@ -324,7 +356,22 @@ namespace Server.Services.BotWatch
         /// </summary>
         private static void RecordStep(Mobile m)
         {
-            if (!IsTracked(m) || !m_Live.TryGetValue(m, out LiveState live) || !live.Online || IsSafe(m))
+            if (!IsTracked(m))
+                return;
+
+            try
+            {
+                RecordStep(m, DateTime.UtcNow);
+            }
+            catch (Exception e)
+            {
+                LogError(e);
+            }
+        }
+
+        private static void RecordStep(Mobile m, DateTime now)
+        {
+            if (!m_Live.TryGetValue(m, out LiveState live) || !live.Online || IsSafe(m))
                 return;
 
             if (live.StepMap != m.Map)
@@ -333,7 +380,7 @@ namespace Server.Services.BotWatch
                 live.StepTiles.Clear();
             }
 
-            HourBucket bucket = live.Record.GetHour(DateTime.UtcNow);
+            HourBucket bucket = live.Record.GetHour(now);
 
             bucket.Steps++;
             live.StepTiles.Add((m.X << 16) | m.Y);
@@ -353,6 +400,18 @@ namespace Server.Services.BotWatch
             if (!IsTracked(m))
                 return;
 
+            try
+            {
+                OpenSession(m);
+            }
+            catch (Exception e)
+            {
+                LogError(e);
+            }
+        }
+
+        private static void OpenSession(Mobile m)
+        {
             DateTime now = DateTime.UtcNow;
             LiveState live = GetLive(m);
 
@@ -368,6 +427,7 @@ namespace Server.Services.BotWatch
 
             live.Online = true;
             live.SessionOutdoorSeconds = 0;
+            live.FreshIdleAlerted = false;
             live.LastMap = m.Map;
             live.InView.Clear();
             live.StepTiles.Clear();
@@ -386,6 +446,7 @@ namespace Server.Services.BotWatch
             };
 
             Sessions.Add(live.Session);
+            TakeSnapshot(m, live.Record);
 
             string key = live.Record.Account + "|" + address;
 
@@ -402,10 +463,17 @@ namespace Server.Services.BotWatch
 
         private static void EndSession(Mobile m)
         {
-            InfoDenial.OnDisconnect(m);
+            try
+            {
+                InfoDenial.OnDisconnect(m);
 
-            if (m != null && m_Live.TryGetValue(m, out LiveState live))
-                CloseSession(m, live, DateTime.UtcNow);
+                if (m != null && m_Live.TryGetValue(m, out LiveState live))
+                    CloseSession(m, live, DateTime.UtcNow);
+            }
+            catch (Exception e)
+            {
+                LogError(e);
+            }
         }
 
         private static void CloseSession(Mobile m, LiveState live, DateTime now)
@@ -425,8 +493,12 @@ namespace Server.Services.BotWatch
                 s.EndInTown = IsSafe(m);
             }
 
-            CharacterRecord rec = live.Record;
+            TakeSnapshot(m, live.Record);
+        }
 
+        /// <summary>Skills and belongings, for the disposable-character signals.</summary>
+        private static void TakeSnapshot(Mobile m, CharacterRecord rec)
+        {
             rec.SkillsTotal = m.SkillsTotal;
             rec.BackpackItems = m.Backpack != null ? m.Backpack.TotalItems : 0;
 
@@ -452,25 +524,40 @@ namespace Server.Services.BotWatch
                 Mobile m = kv.Key;
                 LiveState live = kv.Value;
 
-                if (live.Online && m.NetState != null && !m.Deleted && m.Map != null && m.Map != Map.Internal)
-                    ScanOnline(m, live, now, seconds);
+                try
+                {
+                    if (live.Online && m.NetState != null && !m.Deleted && m.Map != null && m.Map != Map.Internal)
+                        ScanOnline(m, live, now, seconds);
 
-                ResolveEncounters(m, live, now);
-                ResolveAttacks(m, live, now);
+                    ResolveEncounters(m, live, now);
+                    ResolveAttacks(m, live, now);
 
-                live.Meaningful.RemoveAll(t => now - t > IdleWindow + IdleWindow);
+                    live.Meaningful.RemoveAll(t => now - t > IdleWindow + IdleWindow);
 
-                foreach (Serial s in live.LastEncounter.Where(p => now - p.Value > EncounterCooldown).Select(p => p.Key).ToList())
-                    live.LastEncounter.Remove(s);
+                    foreach (Serial s in live.LastEncounter.Where(p => now - p.Value > EncounterCooldown).Select(p => p.Key).ToList())
+                        live.LastEncounter.Remove(s);
 
-                foreach (Serial s in live.LastAttackedBy.Where(p => now - p.Value > TimeSpan.FromMinutes(2)).Select(p => p.Key).ToList())
-                    live.LastAttackedBy.Remove(s);
+                    foreach (Serial s in live.LastAttackedBy.Where(p => now - p.Value > TimeSpan.FromMinutes(2)).Select(p => p.Key).ToList())
+                        live.LastAttackedBy.Remove(s);
+                }
+                catch (Exception e)
+                {
+                    LogError(e);
+                }
 
-                if (!live.Online && live.Pending.Count == 0 && live.Attacks.Count == 0)
+                // A deleted character, or one offline with nothing left to resolve, is done.
+                if (m.Deleted || (!live.Online && live.Pending.Count == 0 && live.Attacks.Count == 0))
                     m_Live.Remove(m);
             }
 
-            GuildReactions.Process(now);
+            try
+            {
+                GuildReactions.Process(now);
+            }
+            catch (Exception e)
+            {
+                LogError(e);
+            }
         }
 
         private static void ScanOnline(Mobile m, LiveState live, DateTime now, int seconds)
@@ -488,7 +575,11 @@ namespace Server.Services.BotWatch
                 bucket.OutdoorSeconds += seconds;
                 live.SessionOutdoorSeconds += seconds;
 
-                Alerts.CheckFreshIdle(m, live.Record, live.Session, live.SessionOutdoorSeconds);
+                if (!live.FreshIdleAlerted && live.SessionOutdoorSeconds >= Alerts.FreshIdleAlert.TotalSeconds)
+                {
+                    live.FreshIdleAlerted = true;
+                    Alerts.CheckFreshIdle(m, live.Record, live.Session, live.SessionOutdoorSeconds);
+                }
             }
 
             // Moving to another facet raises no teleport event, so it is caught here.
@@ -696,6 +787,18 @@ namespace Server.Services.BotWatch
         #region Persistence
         private static void Save()
         {
+            try
+            {
+                SaveData();
+            }
+            catch (Exception e)
+            {
+                LogError(e);
+            }
+        }
+
+        private static void SaveData()
+        {
             DateTime now = DateTime.UtcNow;
 
             foreach (CharacterRecord rec in Characters.Values)
@@ -758,7 +861,44 @@ namespace Server.Services.BotWatch
             });
         }
 
+        /// <summary>
+        /// A damaged save must not stop the shard from starting: it is set aside and
+        /// BotWatch starts with empty data.
+        /// </summary>
         private static void Load()
+        {
+            try
+            {
+                LoadData();
+            }
+            catch (Exception e)
+            {
+                LogError(e);
+
+                Characters.Clear();
+                Sessions.Clear();
+                Addresses.Clear();
+                Alerts.Recent.Clear();
+                Reports.All.Clear();
+                Reports.Blocked.Clear();
+                Flags.All.Clear();
+                Flags.NextId = 1;
+                DataSince = DateTime.UtcNow;
+
+                try
+                {
+                    string aside = SavePath + ".damaged-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+                    File.Move(SavePath, aside);
+                    Utility.WriteConsoleColor(ConsoleColor.Red, "BotWatch: could not load {0}; moved it to {1} and started with empty data.", SavePath, aside);
+                }
+                catch (Exception moveError)
+                {
+                    LogError(moveError);
+                }
+            }
+        }
+
+        private static void LoadData()
         {
             Persistence.Deserialize(SavePath, reader =>
             {

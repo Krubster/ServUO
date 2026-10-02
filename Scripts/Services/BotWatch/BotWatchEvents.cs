@@ -35,7 +35,7 @@ namespace Server.Services.BotWatch
         {
             EventSink.Login += e => StartSession(e.Mobile);
             EventSink.Disconnected += e => EndSession(e.Mobile);
-            EventSink.CharacterCreated += e => { if (IsTracked(e.Mobile)) GetRecord(e.Mobile); };
+            EventSink.CharacterCreated += OnCharacterCreated;
             EventSink.MobileDeleted += OnMobileDeleted;
 
             // Combat
@@ -93,70 +93,118 @@ namespace Server.Services.BotWatch
         }
 
         #region EventSink handlers
+        private static void OnCharacterCreated(CharacterCreatedEventArgs e)
+        {
+            try
+            {
+                if (IsTracked(e.Mobile))
+                    GetRecord(e.Mobile);
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+            }
+        }
+
         private static void OnMobileDeleted(MobileDeletedEventArgs e)
         {
-            if (e.Mobile is PlayerMobile && Characters.TryGetValue(e.Mobile.Serial, out CharacterRecord rec))
-                rec.Deleted = DateTime.UtcNow;
+            try
+            {
+                if (e.Mobile is PlayerMobile && Characters.TryGetValue(e.Mobile.Serial, out CharacterRecord rec))
+                    rec.Deleted = DateTime.UtcNow;
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+            }
         }
 
         private static void OnAggressiveAction(AggressiveActionEventArgs e)
         {
-            Mobile aggressor = Owner(e.Aggressor);
-            Mobile aggressed = e.Aggressed;
-
-            if (!IsTracked(aggressor) || aggressed == null || aggressor == aggressed)
-                return;
-
-            Mobile victimOwner = Owner(aggressed);
-
-            if (IsTracked(victimOwner))
+            try
             {
-                Record(aggressor, Activity.PvPAttack);
-                MarkReaction(aggressor, victimOwner);
-                RecordAttacked(victimOwner, aggressor);
+                Mobile aggressor = Owner(e.Aggressor);
+                Mobile aggressed = e.Aggressed;
+
+                if (!IsTracked(aggressor) || aggressed == null || aggressor == aggressed)
+                    return;
+
+                Mobile victimOwner = Owner(aggressed);
+
+                if (IsTracked(victimOwner))
+                {
+                    Record(aggressor, Activity.PvPAttack);
+                    MarkReaction(aggressor, victimOwner);
+                    RecordAttacked(victimOwner, aggressor);
+                }
+                else if (aggressed is BaseCreature)
+                {
+                    Record(aggressor, Activity.PvMAttack);
+                }
             }
-            else if (aggressed is BaseCreature)
+            catch (Exception ex)
             {
-                Record(aggressor, Activity.PvMAttack);
+                LogError(ex);
             }
         }
 
         private static void OnKill(Mobile killer, Mobile victim)
         {
-            Mobile owner = Owner(killer);
+            try
+            {
+                Mobile owner = Owner(killer);
 
-            if (IsTracked(owner) && victim is BaseCreature)
-                Record(owner, Activity.PvMKill);
+                if (IsTracked(owner) && victim is BaseCreature)
+                    Record(owner, Activity.PvMKill);
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+            }
         }
 
         private static void OnPlayerDeath(PlayerDeathEventArgs e)
         {
-            Mobile killer = Owner(e.Killer);
+            try
+            {
+                Mobile killer = Owner(e.Killer);
 
-            if (IsTracked(killer) && killer != e.Mobile)
-            {
-                Record(e.Mobile, Activity.PvPDeath);
-                Record(killer, Activity.PvPKill);
+                if (IsTracked(killer) && killer != e.Mobile)
+                {
+                    Record(e.Mobile, Activity.PvPDeath);
+                    Record(killer, Activity.PvPKill);
+                }
+                else
+                {
+                    Record(e.Mobile, Activity.PvMDeath);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                Record(e.Mobile, Activity.PvMDeath);
+                LogError(ex);
             }
         }
 
         private static void OnSpeech(SpeechEventArgs e)
         {
-            if (e.Speech != null && e.Speech.StartsWith(CommandSystem.Prefix))
-                return;
-
-            switch (e.Type)
+            try
             {
-                case MessageType.Whisper: Record(e.Mobile, Activity.Whisper); break;
-                case MessageType.Yell: Record(e.Mobile, Activity.Yell); break;
-                case MessageType.Emote: Record(e.Mobile, Activity.Emote); break;
-                case MessageType.Guild:
-                case MessageType.Alliance: Record(e.Mobile, Activity.GuildChat); break;
-                default: Record(e.Mobile, Activity.Speech); break;
+                if (e.Speech != null && e.Speech.StartsWith(CommandSystem.Prefix))
+                    return;
+
+                switch (e.Type)
+                {
+                    case MessageType.Whisper: Record(e.Mobile, Activity.Whisper); break;
+                    case MessageType.Yell: Record(e.Mobile, Activity.Yell); break;
+                    case MessageType.Emote: Record(e.Mobile, Activity.Emote); break;
+                    case MessageType.Guild:
+                    case MessageType.Alliance: Record(e.Mobile, Activity.GuildChat); break;
+                    default: Record(e.Mobile, Activity.Speech); break;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
             }
         }
 
@@ -171,31 +219,55 @@ namespace Server.Services.BotWatch
         /// </summary>
         private static void OnTargetedMobile(Mobile from, Mobile target, bool beneficial)
         {
-            Mobile other = Owner(target);
+            try
+            {
+                Mobile other = Owner(target);
 
-            if (!IsTracked(from) || !IsTracked(other) || other == from)
-                return;
+                if (!IsTracked(from) || !IsTracked(other) || other == from)
+                    return;
 
-            Record(from, Activity.TargetPlayer);
+                Record(from, Activity.TargetPlayer);
 
-            if (beneficial)
-                Record(from, Activity.AssistOther);
+                if (beneficial)
+                    Record(from, Activity.AssistOther);
 
-            MarkReaction(from, other);
+                MarkReaction(from, other);
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+            }
         }
 
         private static void OnTeleportMovement(TeleportMovementEventArgs e)
         {
-            if (IsTracked(e.Mobile) && !Utility.InRange(e.OldLocation, e.NewLocation, 1))
-                Record(e.Mobile, Activity.TravelJump);
+            try
+            {
+                if (IsTracked(e.Mobile) && !Utility.InRange(e.OldLocation, e.NewLocation, 1))
+                    Record(e.Mobile, Activity.TravelJump);
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+            }
         }
 
         private static void OnEnterRegion(OnEnterRegionEventArgs e)
         {
-            Region dungeon = e.NewRegion?.GetRegion(typeof(DungeonRegion));
+            if (!IsTracked(e.From))
+                return;
 
-            if (dungeon != null && dungeon != e.OldRegion?.GetRegion(typeof(DungeonRegion)))
-                Record(e.From, Activity.DungeonEnter);
+            try
+            {
+                Region dungeon = e.NewRegion?.GetRegion(typeof(DungeonRegion));
+
+                if (dungeon != null && dungeon != e.OldRegion?.GetRegion(typeof(DungeonRegion)))
+                    Record(e.From, Activity.DungeonEnter);
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+            }
         }
         #endregion
 
@@ -211,19 +283,26 @@ namespace Server.Services.BotWatch
         /// </summary>
         public static void OnHeal(Mobile healer, Mobile target, int amount)
         {
-            healer = Owner(healer);
-
-            if (!IsTracked(healer) || target == null || amount <= 0)
-                return;
-
-            if (healer == target)
+            try
             {
-                Record(healer, Activity.HealSelf);
-                return;
-            }
+                healer = Owner(healer);
 
-            Record(healer, Activity.HealOther);
-            MarkReaction(healer, Owner(target));
+                if (!IsTracked(healer) || target == null || amount <= 0)
+                    return;
+
+                if (healer == target)
+                {
+                    Record(healer, Activity.HealSelf);
+                    return;
+                }
+
+                Record(healer, Activity.HealOther);
+                MarkReaction(healer, Owner(target));
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+            }
         }
 
         /// <summary>
@@ -232,19 +311,26 @@ namespace Server.Services.BotWatch
         /// </summary>
         public static void OnBuff(Mobile caster, Mobile target)
         {
-            caster = Owner(caster);
-
-            if (!IsTracked(caster) || target == null)
-                return;
-
-            if (caster == target)
+            try
             {
-                Record(caster, Activity.BuffSelf);
-                return;
-            }
+                caster = Owner(caster);
 
-            Record(caster, Activity.BuffOther);
-            MarkReaction(caster, Owner(target));
+                if (!IsTracked(caster) || target == null)
+                    return;
+
+                if (caster == target)
+                {
+                    Record(caster, Activity.BuffSelf);
+                    return;
+                }
+
+                Record(caster, Activity.BuffOther);
+                MarkReaction(caster, Owner(target));
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+            }
         }
 
         /// <summary>
@@ -253,14 +339,21 @@ namespace Server.Services.BotWatch
         /// </summary>
         public static void OnPlayerTrade(Mobile a, Mobile b)
         {
-            if (a == null || b == null || a == b)
-                return;
+            try
+            {
+                if (a == null || b == null || a == b)
+                    return;
 
-            Record(a, Activity.PlayerTrade);
-            Record(b, Activity.PlayerTrade);
+                Record(a, Activity.PlayerTrade);
+                Record(b, Activity.PlayerTrade);
 
-            MarkReaction(a, b);
-            MarkReaction(b, a);
+                MarkReaction(a, b);
+                MarkReaction(b, a);
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+            }
         }
 
         /// <summary>
@@ -269,10 +362,17 @@ namespace Server.Services.BotWatch
         /// </summary>
         public static void OnCorpseLoot(Mobile looter, Corpse corpse, Item item)
         {
-            if (!IsTracked(looter) || corpse == null || corpse.Owner == looter)
-                return;
+            try
+            {
+                if (!IsTracked(looter) || corpse == null || corpse.Owner == looter)
+                    return;
 
-            Record(looter, corpse.Owner is PlayerMobile ? Activity.LootPvP : Activity.LootPvM);
+                Record(looter, corpse.Owner is PlayerMobile ? Activity.LootPvP : Activity.LootPvM);
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+            }
         }
 
         /// <summary>
@@ -292,17 +392,24 @@ namespace Server.Services.BotWatch
         /// </summary>
         public static void OnRevealed(Mobile revealer, Mobile revealed)
         {
-            revealer = Owner(revealer);
-
-            if (revealed == null || revealer == revealed)
-                return;
-
-            Record(revealed, Activity.RevealedByOther);
-
-            if (IsTracked(revealed))
+            try
             {
-                Record(revealer, Activity.RevealedOther);
-                MarkReaction(revealer, revealed);
+                revealer = Owner(revealer);
+
+                if (revealed == null || revealer == revealed)
+                    return;
+
+                Record(revealed, Activity.RevealedByOther);
+
+                if (IsTracked(revealed))
+                {
+                    Record(revealer, Activity.RevealedOther);
+                    MarkReaction(revealer, revealed);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
             }
         }
 
@@ -312,25 +419,32 @@ namespace Server.Services.BotWatch
         /// </summary>
         public static void OnDamage(Mobile from, Mobile to, int amount)
         {
-            if (to == null || amount <= 0)
-                return;
+            try
+            {
+                if (to == null || amount <= 0)
+                    return;
 
-            DateTime now = DateTime.UtcNow;
+                DateTime now = DateTime.UtcNow;
 
-            if (IsTracked(to))
-                GetLive(to).Record.GetHour(now).DamageTaken += amount;
+                if (IsTracked(to))
+                    GetLive(to).Record.GetHour(now).DamageTaken += amount;
 
-            from = Owner(from);
+                from = Owner(from);
 
-            if (!IsTracked(from) || from == to)
-                return;
+                if (!IsTracked(from) || from == to)
+                    return;
 
-            HourBucket bucket = GetLive(from).Record.GetHour(now);
+                HourBucket bucket = GetLive(from).Record.GetHour(now);
 
-            if (IsTracked(Owner(to)))
-                bucket.DamageDealtPvP += amount;
-            else if (to is BaseCreature)
-                bucket.DamageDealtPvM += amount;
+                if (IsTracked(Owner(to)))
+                    bucket.DamageDealtPvP += amount;
+                else if (to is BaseCreature)
+                    bucket.DamageDealtPvM += amount;
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+            }
         }
 
         /// <summary>
@@ -348,15 +462,22 @@ namespace Server.Services.BotWatch
         /// </summary>
         public static void OnGoldChange(Mobile m, int delta)
         {
-            if (!IsTracked(m) || delta == 0)
-                return;
+            try
+            {
+                if (!IsTracked(m) || delta == 0)
+                    return;
 
-            HourBucket bucket = GetLive(m).Record.GetHour(DateTime.UtcNow);
+                HourBucket bucket = GetLive(m).Record.GetHour(DateTime.UtcNow);
 
-            if (delta > 0)
-                bucket.GoldGained += delta;
-            else
-                bucket.GoldLost -= delta;
+                if (delta > 0)
+                    bucket.GoldGained += delta;
+                else
+                    bucket.GoldLost -= delta;
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+            }
         }
 
         /// <summary>
@@ -373,8 +494,15 @@ namespace Server.Services.BotWatch
         /// </summary>
         public static void OnHealthBarRequest(Mobile from, Mobile target)
         {
-            if (target != null && target != from)
-                Record(from, Activity.HealthBarRequest);
+            try
+            {
+                if (target != null && target != from)
+                    Record(from, Activity.HealthBarRequest);
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+            }
         }
         #endregion
     }

@@ -73,6 +73,12 @@ namespace Server.Services.BotWatch
         }
 
         #region Formatting
+        /// <summary>Player-controlled text (names, guild names, notes) must not be read as gump HTML.</summary>
+        public static string Escape(string text)
+        {
+            return (text ?? String.Empty).Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+        }
+
         public static string Text(string text)
         {
             return Text(text, "#FFFFFF");
@@ -120,7 +126,7 @@ namespace Server.Services.BotWatch
         {
             string status = rec.IsDeleted ? "deleted" : BotWatch.IsOnline(rec.Serial) ? "online" : "offline";
 
-            AddHtml(20, 18, Width - 40, 20, Text(String.Format("<BIG>{0}</BIG>   account {1}   ({2})", rec.Name, rec.Account, status), "#FFD080"), false, false);
+            AddHtml(20, 18, Width - 40, 20, Text(String.Format("<BIG>{0}</BIG>   account {1}   ({2})", Escape(rec.Name), Escape(rec.Account), status), "#FFD080"), false, false);
 
             string line = String.Format("Character age {0}, account age {1}, skills {2:F1}, bank items {3}",
                 Age(rec.CharacterCreated), Age(rec.AccountCreated), rec.SkillsTotal / 10.0, rec.BankItems);
@@ -186,7 +192,7 @@ namespace Server.Services.BotWatch
             AddHtml(20, y, 270, 20, Text("Notes", "#FFD080"), false, false);
             y += 22;
 
-            string notes = p.Notes.Count > 0 ? String.Join("<BR>", p.Notes) : "None";
+            string notes = p.Notes.Count > 0 ? String.Join("<BR>", p.Notes.Select(Escape)) : "None";
             AddHtml(20, y, 270, Height - 70 - y, Text(notes, "#C0C0C0"), false, true);
 
             // Watch and Session scores

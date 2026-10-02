@@ -102,6 +102,7 @@ namespace Server.Services.BotWatch
 
         private static readonly Dictionary<Serial, Trail> m_Trails = new Dictionary<Serial, Trail>();
         private static readonly List<PendingCheck> m_Pending = new List<PendingCheck>();
+        private static DateTime m_LastTrim;
 
         public static void Configure()
         {
@@ -190,6 +191,11 @@ namespace Server.Services.BotWatch
                     Add(rec.GuildBaseline, new GuildCheck { Time = t, Guilds = Converged(c, t) }, MaxBaseline);
                 }
             }
+
+            if (now - m_LastTrim < TimeSpan.FromMinutes(1))
+                return;
+
+            m_LastTrim = now;
 
             DateTime cutoff = now - TrailLength;
 

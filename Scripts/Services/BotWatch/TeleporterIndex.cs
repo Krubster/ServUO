@@ -21,7 +21,17 @@ namespace Server.Services.BotWatch
         public static void Initialize()
         {
             // Teleport regions are created on a delayed call after startup.
-            Timer.DelayCall(TimeSpan.FromSeconds(10), TimeSpan.FromHours(1), Rebuild);
+            Timer.DelayCall(TimeSpan.FromSeconds(10), TimeSpan.FromHours(1), () =>
+            {
+                try
+                {
+                    Rebuild();
+                }
+                catch (Exception e)
+                {
+                    BotWatch.LogError(e);
+                }
+            });
         }
 
         public static void Rebuild()
@@ -46,7 +56,7 @@ namespace Server.Services.BotWatch
                 count++;
             }
 
-            foreach (Item item in World.Items.Values.ToList())
+            foreach (Item item in World.Items.Values)
             {
                 if (!item.Deleted && item.Parent == null && (item is Teleporter || item is Moongate || item is PublicMoongate))
                     Add(item.Map, item.X, item.Y);

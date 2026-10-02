@@ -55,6 +55,19 @@ namespace Server.Services.BotWatch
             if (m_Denied.Count == 0 || Bypass || !m_Denied.Contains(observer))
                 return false;
 
+            try
+            {
+                return HidesFrom(observer, target);
+            }
+            catch (Exception e)
+            {
+                BotWatch.LogError(e);
+                return false;
+            }
+        }
+
+        private static bool HidesFrom(Mobile observer, Mobile target)
+        {
             if (target == observer || !BotWatch.IsTracked(target) || target.Account == observer.Account)
                 return false;
 

@@ -78,8 +78,8 @@ namespace Server.Services.BotWatch
                 string name = rec.Name + (rec.IsDeleted ? " (deleted)" : BotWatch.IsOnline(rec.Serial) ? " *" : String.Empty);
 
                 AddButton(20, y, 4011, 4012, ButtonProfileBase + i, GumpButtonType.Reply, 0);
-                AddHtml(cols[0], y + 2, 135, 20, ProfileGump.Text(name), false, false);
-                AddHtml(cols[1], y + 2, 105, 20, ProfileGump.Text(rec.Account ?? "?", "#C0C0C0"), false, false);
+                AddHtml(cols[0], y + 2, 135, 20, ProfileGump.Text(ProfileGump.Escape(name)), false, false);
+                AddHtml(cols[1], y + 2, 105, 20, ProfileGump.Text(ProfileGump.Escape(rec.Account ?? "?"), "#C0C0C0"), false, false);
                 AddHtml(cols[2], y + 2, 60, 20, ProfileGump.Text(String.Format("{0:F1}h", p.OnlineHours) + (p.InPopulation ? String.Empty : "!"), "#C0C0C0"), false, false);
                 AddHtml(cols[3], y + 2, 55, 20, ProfileGump.Text(ProfileGump.Score(p.Watch), ProfileGump.ScoreColor(p.Watch, Ratings.ScoutWatchThreshold)), false, false);
                 AddHtml(cols[4], y + 2, 60, 20, ProfileGump.Text(ProfileGump.Score(p.Session), ProfileGump.ScoreColor(p.Session, Ratings.SessionThreshold)), false, false);

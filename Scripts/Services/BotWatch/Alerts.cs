@@ -74,7 +74,18 @@ namespace Server.Services.BotWatch
 
         public static void Initialize()
         {
-            Timer.DelayCall(CheckInterval, CheckInterval, CheckWatchPatterns);
+            // First check shortly after startup, so flags and information denial are current.
+            Timer.DelayCall(TimeSpan.FromMinutes(2), CheckInterval, () =>
+            {
+                try
+                {
+                    CheckWatchPatterns();
+                }
+                catch (Exception e)
+                {
+                    BotWatch.LogError(e);
+                }
+            });
         }
 
         /// <summary>
