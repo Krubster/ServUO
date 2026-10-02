@@ -47,6 +47,9 @@ namespace Server.Services.BotWatch
                 from.SendMessage("Crafts {0}, harvests {1}, trades {2} | skill gains {3}, skill uses {4}, spells {5}, item uses {6}, speech {7}",
                     c[(int)Activity.Craft], c[(int)Activity.Gather], c[(int)Activity.Trade], c[(int)Activity.SkillGain],
                     c[(int)Activity.SkillUse], c[(int)Activity.Spell], c[(int)Activity.ItemUse], c[(int)Activity.Speech]);
+                from.SendMessage("Heals self/others {0}/{1}, buffs self/others {2}/{3}, player trades {4}, looted PvM/PvP {5}/{6}",
+                    c[(int)Activity.HealSelf], c[(int)Activity.HealOther], c[(int)Activity.BuffSelf], c[(int)Activity.BuffOther],
+                    c[(int)Activity.PlayerTrade], c[(int)Activity.LootPvM], c[(int)Activity.LootPvP]);
                 from.SendMessage("Encounters {0}: idle {1}, reacted {2}, near teleporters {3} ({4} idle)",
                     b.Encounters, b.IdleEncounters, b.ReactedEncounters, b.TeleporterEncounters, b.TeleporterIdleEncounters);
                 from.SendMessage("Character created {0:yyyy-MM-dd}, account created {1:yyyy-MM-dd}, skills {2:F1}, backpack items {3}, bank items {4}",

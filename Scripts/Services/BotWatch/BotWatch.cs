@@ -132,9 +132,21 @@ namespace Server.Services.BotWatch
             return m is PlayerMobile && !m.Deleted && m.AccessLevel == AccessLevel.Player;
         }
 
+        /// <summary>
+        /// Activities that count against idleness. Self-heals, self-buffs, skill use, spells,
+        /// item use and speech are left out because a bot can repeat them at its post.
+        /// </summary>
+        private static readonly HashSet<Activity> m_Meaningful = new HashSet<Activity>
+        {
+            Activity.PvMAttack, Activity.PvMKill, Activity.PvPAttack, Activity.PvPKill,
+            Activity.Craft, Activity.Gather, Activity.Trade,
+            Activity.HealOther, Activity.BuffOther, Activity.PlayerTrade,
+            Activity.LootPvM, Activity.LootPvP
+        };
+
         public static bool IsMeaningful(Activity a)
         {
-            return a <= Activity.Trade;
+            return m_Meaningful.Contains(a);
         }
 
         public static bool IsTown(Region r)
@@ -229,15 +241,7 @@ namespace Server.Services.BotWatch
             if (IsTracked(victimOwner))
             {
                 Record(aggressor, Activity.PvPAttack);
-
-                // Attacking someone just encountered is a reaction to that encounter.
-                DateTime now = DateTime.UtcNow;
-
-                foreach (PendingEncounter p in GetLive(aggressor).Pending)
-                {
-                    if (p.Other == victimOwner.Serial && now - p.Time <= ReactionWindow)
-                        p.Reacted = true;
-                }
+                MarkReaction(aggressor, victimOwner);
             }
             else if (aggressed is BaseCreature)
             {
@@ -269,6 +273,99 @@ namespace Server.Services.BotWatch
                 return;
 
             Record(e.Mobile, Activity.Speech);
+        }
+
+        /// <summary>
+        /// Doing something to a player shortly after encountering them is a reaction to
+        /// that encounter.
+        /// </summary>
+        private static void MarkReaction(Mobile m, Mobile other)
+        {
+            if (!IsTracked(m) || other == null || !m_Live.TryGetValue(m, out LiveState live))
+                return;
+
+            DateTime now = DateTime.UtcNow;
+
+            foreach (PendingEncounter p in live.Pending)
+            {
+                if (p.Other == other.Serial && now - p.Time <= ReactionWindow)
+                    p.Reacted = true;
+            }
+        }
+        #endregion
+
+        #region Handlers for hooks without an EventSink event
+        // ServUO raises no event for these. Call the handlers from the places noted below.
+
+        /// <summary>
+        /// A heal landed. Call where hits are restored with a known source, e.g.
+        /// Mobile.Heal(int amount, Mobile from, bool message) in Server/Mobile.cs, which
+        /// bandages, potions and SpellHelper.Heal all go through.
+        /// </summary>
+        public static void OnHeal(Mobile healer, Mobile target, int amount)
+        {
+            healer = Owner(healer);
+
+            if (!IsTracked(healer) || target == null || amount <= 0)
+                return;
+
+            if (healer == target)
+            {
+                Record(healer, Activity.HealSelf);
+                return;
+            }
+
+            Record(healer, Activity.HealOther);
+            MarkReaction(healer, Owner(target));
+        }
+
+        /// <summary>
+        /// A beneficial effect (buff, cure, protection...) was applied. Call from
+        /// BuffInfo.AddBuff in Scripts/Misc/BuffIcons.cs or from the individual spells.
+        /// </summary>
+        public static void OnBuff(Mobile caster, Mobile target)
+        {
+            caster = Owner(caster);
+
+            if (!IsTracked(caster) || target == null)
+                return;
+
+            if (caster == target)
+            {
+                Record(caster, Activity.BuffSelf);
+                return;
+            }
+
+            Record(caster, Activity.BuffOther);
+            MarkReaction(caster, Owner(target));
+        }
+
+        /// <summary>
+        /// A secure trade between two players completed. Call from SecureTrade.Update in
+        /// Server/SecureTrade.cs once both sides accepted and items were exchanged.
+        /// </summary>
+        public static void OnPlayerTrade(Mobile a, Mobile b)
+        {
+            if (a == null || b == null || a == b)
+                return;
+
+            Record(a, Activity.PlayerTrade);
+            Record(b, Activity.PlayerTrade);
+
+            MarkReaction(a, b);
+            MarkReaction(b, a);
+        }
+
+        /// <summary>
+        /// An item was taken from a corpse. Call from Corpse.OnItemLifted in
+        /// Scripts/Items/Corpses/Corpse.cs. Looting your own corpse is not counted.
+        /// </summary>
+        public static void OnCorpseLoot(Mobile looter, Corpse corpse, Item item)
+        {
+            if (!IsTracked(looter) || corpse == null || corpse.Owner == looter)
+                return;
+
+            Record(looter, corpse.Owner is PlayerMobile ? Activity.LootPvP : Activity.LootPvM);
         }
         #endregion
 

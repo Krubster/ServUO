@@ -5,9 +5,8 @@ using System.Linq;
 namespace Server.Services.BotWatch
 {
     /// <summary>
-    /// Counted activity types. The first group counts as "meaningful" when deciding whether
-    /// a character was idle; the rest are recorded for the profile only, because they are
-    /// cheap to automate while standing at a post.
+    /// Counted activity types. Values are saved by index, so new ones go at the end.
+    /// See BotWatch.IsMeaningful for which ones count against idleness.
     /// </summary>
     public enum Activity
     {
@@ -24,7 +23,15 @@ namespace Server.Services.BotWatch
         SkillUse,
         Spell,
         ItemUse,
-        Speech
+        Speech,
+
+        HealSelf,
+        HealOther,
+        BuffSelf,
+        BuffOther,
+        PlayerTrade,
+        LootPvM,
+        LootPvP
     }
 
     public class HourBucket
