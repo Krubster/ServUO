@@ -13,7 +13,8 @@ namespace Server.Services.BotWatch
         FreshWatchPattern,
         Report,
         Flagged,
-        InfoDenied
+        InfoDenied,
+        StaffAction
     }
 
     public class AlertRecord

@@ -123,6 +123,7 @@ namespace Server.Services.BotWatch
             Flags.Configure();
             GuildReactions.Configure();
             InfoDenial.Configure();
+            StaffActions.Configure();
 
             EventSink.WorldSave += e => Save();
             EventSink.WorldLoad += Load;

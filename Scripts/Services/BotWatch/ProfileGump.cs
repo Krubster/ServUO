@@ -19,7 +19,7 @@ namespace Server.Services.BotWatch
         }
 
         private const int Width = 760;
-        private const int Height = 560;
+        private const int Height = 610;
 
         private const int ButtonOverview = 1;
         private const int ButtonDaily = 2;
@@ -28,6 +28,8 @@ namespace Server.Services.BotWatch
         private const int ButtonGoTo = 5;
         private const int ButtonList = 6;
         private const int ButtonNetwork = 7;
+        private const int ButtonJail = 8;
+        private const int ButtonRelease = 9;
 
         private readonly Serial m_Serial;
         private readonly View m_View;
@@ -193,7 +195,7 @@ namespace Server.Services.BotWatch
             y += 22;
 
             string notes = p.Notes.Count > 0 ? String.Join("<BR>", p.Notes.Select(Escape)) : "None";
-            AddHtml(20, y, 270, Height - 70 - y, Text(notes, "#C0C0C0"), false, true);
+            AddHtml(20, y, 270, Height - 100 - y, Text(notes, "#C0C0C0"), false, true);
 
             // Watch and Session scores
             int x = 305;
@@ -292,11 +294,37 @@ namespace Server.Services.BotWatch
             AddButtonLabel(340, y, ButtonNetwork, "Network", false);
             AddButtonLabel(445, y, ButtonRefresh, "Refresh", false);
 
-            if (staff.AccessLevel >= AccessLevel.GameMaster && BotWatch.IsOnline(rec.Serial))
-                AddButtonLabel(545, y, ButtonGoTo, "Go to", false);
-
             if (m_FromList)
-                AddButtonLabel(640, y, ButtonList, "List", false);
+                AddButtonLabel(545, y, ButtonList, "List", false);
+
+            AddStaffActions(this, staff, rec.Serial, 15, Height - 72, ButtonGoTo, ButtonJail, ButtonRelease);
+        }
+
+        /// <summary>Go to / Jail / Release buttons, shown by access level and the character's state.</summary>
+        public static void AddStaffActions(Gump g, Mobile staff, Serial serial, int x, int y, int goTo, int jail, int release)
+        {
+            Mobile m = World.FindMobile(serial);
+
+            if (m == null || m.Deleted)
+                return;
+
+            g.AddHtml(x, y + 2, 95, 20, Text("Staff actions:", "#FFD080"), false, false);
+            x += 105;
+
+            if (staff.AccessLevel >= StaffActions.GoToAccess)
+            {
+                g.AddButton(x, y, 4005, 4007, goTo, GumpButtonType.Reply, 0);
+                g.AddHtml(x + 35, y + 2, 75, 20, Text("Go to"), false, false);
+                x += 105;
+            }
+
+            if (staff.AccessLevel >= StaffActions.JailAccess && m.AccessLevel < staff.AccessLevel)
+            {
+                bool jailed = StaffActions.IsJailed(m);
+
+                g.AddButton(x, y, 4005, 4007, jailed ? release : jail, GumpButtonType.Reply, 0);
+                g.AddHtml(x + 35, y + 2, 75, 20, Text(jailed ? "Release" : "Jail", jailed ? "#70E070" : "#FF5050"), false, false);
+            }
         }
 
         private void AddButtonLabel(int x, int y, int id, string label, bool selected)
@@ -327,15 +355,23 @@ namespace Server.Services.BotWatch
                     from.SendGump(new ProfileGump(from, m_Serial, m_View, m_FromList));
                     break;
                 case ButtonGoTo:
+                    StaffActions.GoTo(from, m_Serial);
+                    from.SendGump(new ProfileGump(from, m_Serial, m_View, m_FromList));
+                    break;
+                case ButtonJail:
                     {
-                        Mobile m = World.FindMobile(m_Serial);
+                        Serial serial = m_Serial;
+                        View view = m_View;
+                        bool fromList = m_FromList;
+                        string name = BotWatch.Characters.TryGetValue(serial, out CharacterRecord r) ? r.Name : "this character";
 
-                        if (m != null && from.AccessLevel >= AccessLevel.GameMaster && m.Map != null && m.Map != Map.Internal)
-                            from.MoveToWorld(m.Location, m.Map);
-
-                        from.SendGump(new ProfileGump(from, m_Serial, m_View, m_FromList));
+                        from.SendGump(new JailConfirmGump(serial, name, staff => staff.SendGump(new ProfileGump(staff, serial, view, fromList))));
                         break;
                     }
+                case ButtonRelease:
+                    StaffActions.Release(from, m_Serial);
+                    from.SendGump(new ProfileGump(from, m_Serial, m_View, m_FromList));
+                    break;
                 case ButtonList:
                     from.SendGump(new ProfilesGump(from, ProfilesGump.SortBy.Watch, 0));
                     break;

@@ -183,7 +183,7 @@ namespace Server.Services.BotWatch
     public class FlagGump : Gump
     {
         private const int Width = 760;
-        private const int Height = 620;
+        private const int Height = 650;
 
         private const int ButtonLegit = 1;
         private const int ButtonConfirm = 2;
@@ -195,6 +195,9 @@ namespace Server.Services.BotWatch
         private const int ButtonProfile = 8;
         private const int ButtonNetwork = 9;
         private const int ButtonList = 10;
+        private const int ButtonGoTo = 11;
+        private const int ButtonJail = 12;
+        private const int ButtonRelease = 13;
         private const int ButtonSnapshotBase = 20;
 
         private const int NoteEntry = 0;
@@ -273,10 +276,10 @@ namespace Server.Services.BotWatch
 
             Snapshot s = m_Snapshot >= 0 ? flag.Snapshots[m_Snapshot] : null;
 
-            AddHtml(20, 150, Width - 40, Height - 240, s != null ? Render(s) : ProfileGump.Text("No evidence recorded."), true, true);
+            AddHtml(20, 150, Width - 40, Height - 270, s != null ? Render(s) : ProfileGump.Text("No evidence recorded."), true, true);
 
             // Actions
-            int y = Height - 80;
+            int y = Height - 112;
 
             if (flag.Status == FlagStatus.Open)
             {
@@ -299,6 +302,8 @@ namespace Server.Services.BotWatch
             AddAction(20, y, ButtonProfile, "Profile");
             AddAction(150, y, ButtonNetwork, "Network");
             AddAction(290, y, ButtonList, "Back to flags");
+
+            ProfileGump.AddStaffActions(this, staff, flag.Character, 20, y + 34, ButtonGoTo, ButtonJail, ButtonRelease);
         }
 
         private void AddAction(int x, int y, int id, string label)
@@ -374,6 +379,21 @@ namespace Server.Services.BotWatch
                 case ButtonList:
                     from.SendGump(new FlagsGump(from, m_ListFilter, 0));
                     return;
+                case ButtonGoTo:
+                    StaffActions.GoTo(from, flag.Character);
+                    break;
+                case ButtonJail:
+                    {
+                        int flagId = m_Id;
+                        int snapshot = m_Snapshot;
+                        FlagStatus? filter = m_ListFilter;
+
+                        from.SendGump(new JailConfirmGump(flag.Character, flag.Name, staff => staff.SendGump(new FlagGump(staff, flagId, snapshot, filter))));
+                        return;
+                    }
+                case ButtonRelease:
+                    StaffActions.Release(from, flag.Character);
+                    break;
                 default:
                     if (id >= ButtonSnapshotBase && id - ButtonSnapshotBase < flag.Snapshots.Count)
                         from.SendGump(new FlagGump(from, m_Id, id - ButtonSnapshotBase, m_ListFilter));
